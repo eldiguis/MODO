@@ -13,6 +13,7 @@ import 'data/nearby_store_repository.dart';
 import 'data/product_catalog_repository.dart';
 import 'models/garment.dart';
 import 'models/nearby_store.dart';
+import 'sensor_camera_guide.dart';
 import 'google_sign_in_web_stub.dart' as google_web
     if (dart.library.html) 'package:google_sign_in_web/web_only.dart';
 
@@ -740,19 +741,124 @@ class _ShopShellState extends State<ShopShell> {
   }
 
   Future<void> pickCapture(bool front) async {
-    final image = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 88,
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: paper,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 20, 22, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: lime,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.sensors, size: 22, color: ink),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          front ? 'Foto Frontal con IA' : 'Foto Lateral con IA',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        const Text(
+                          'Usa el acelerómetro para calibrar el ángulo perpendicular a 90°',
+                          style: TextStyle(fontSize: 12, color: muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: ink,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                icon: const Icon(Icons.camera_alt, size: 20),
+                label: const Text(
+                  'Cámara con Sensor IA (Acelerómetro)',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                ),
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  final Uint8List? bytes = await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => SensorCameraGuideScreen(
+                        front: front,
+                        picker: picker,
+                      ),
+                    ),
+                  );
+                  if (bytes != null) {
+                    setState(() {
+                      if (front) {
+                        frontPhoto = bytes;
+                      } else {
+                        sidePhoto = bytes;
+                      }
+                    });
+                  }
+                },
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: ink,
+                  side: const BorderSide(color: line),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                icon: const Icon(Icons.photo_library_outlined, size: 20),
+                label: const Text(
+                  'Elegir de la Galería',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                ),
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  final image = await picker.pickImage(
+                    source: ImageSource.gallery,
+                    imageQuality: 88,
+                  );
+                  if (image == null) return;
+                  final bytes = await image.readAsBytes();
+                  setState(() {
+                    if (front) {
+                      frontPhoto = bytes;
+                    } else {
+                      sidePhoto = bytes;
+                    }
+                  });
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
     );
-    if (image == null) return;
-    final bytes = await image.readAsBytes();
-    setState(() {
-      if (front) {
-        frontPhoto = bytes;
-      } else {
-        sidePhoto = bytes;
-      }
-    });
   }
 
   @override
@@ -1373,7 +1479,39 @@ class _ShopShellState extends State<ShopShell> {
                 'Sube dos fotos y descubre cómo te queda.',
                 style: TextStyle(fontSize: 14, color: muted),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF2F7E6),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFD3E7B2)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(5),
+                      decoration: BoxDecoration(
+                        color: lime,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Icon(Icons.sensors, size: 18, color: ink),
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Sensor Acelerómetro activo: calibra el ángulo recto (90°) al tomar la foto.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF2E5316),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
               Row(
                 children: [
                   Expanded(child: captureCard(true)),
