@@ -14,6 +14,7 @@ import 'data/product_catalog_repository.dart';
 import 'models/garment.dart';
 import 'models/nearby_store.dart';
 import 'sensor_camera_guide.dart';
+import 'user_guide_dialogs.dart';
 import 'google_sign_in_web_stub.dart' as google_web
     if (dart.library.html) 'package:google_sign_in_web/web_only.dart';
 
@@ -591,6 +592,9 @@ class _ShopShellState extends State<ShopShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkFirstTimeGuides();
+    });
     if (!widget.firebaseConfigured) {
       catalogLoading = false;
       catalogError = kIsWeb
@@ -616,6 +620,44 @@ class _ShopShellState extends State<ShopShell> {
           catalogError = 'No se pudo leer la colección productos de Firebase.';
         });
       },
+    );
+  }
+
+  Future<void> _checkFirstTimeGuides() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hasSeen = prefs.getBool('has_seen_welcome_tour') ?? false;
+      if (!hasSeen && mounted) {
+        await prefs.setBool('has_seen_welcome_tour', true);
+        if (mounted) showWelcomeTour();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _checkFittingRoomGuide() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hasSeen = prefs.getBool('has_seen_fitting_coach') ?? false;
+      if (!hasSeen && mounted) {
+        await prefs.setBool('has_seen_fitting_coach', true);
+        if (mounted) showFittingRoomCoach();
+      }
+    } catch (_) {}
+  }
+
+  void showWelcomeTour({bool force = false}) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => const WelcomeTourDialog(),
+    );
+  }
+
+  void showFittingRoomCoach({bool force = false}) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => const FittingRoomCoachDialog(),
     );
   }
 
@@ -934,7 +976,12 @@ class _ShopShellState extends State<ShopShell> {
               backgroundColor: Colors.white,
               indicatorColor: const Color(0xFFECEAE4),
               selectedIndex: tab,
-              onDestinationSelected: (value) => setState(() => tab = value),
+              onDestinationSelected: (value) {
+                setState(() => tab = value);
+                if (value == 2) {
+                  _checkFittingRoomGuide();
+                }
+              },
               destinations: [
                 const NavigationDestination(
                   icon: Icon(Icons.grid_view_outlined),
@@ -1080,6 +1127,42 @@ class _ShopShellState extends State<ShopShell> {
                 value: reduceMotion,
                 onChanged: (value) => setState(() => reduceMotion = value),
               ),
+              const Divider(height: 24),
+              const Text(
+                'Ayuda y Tutoriales',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 6),
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                leading: const CircleAvatar(
+                  backgroundColor: Color(0xFFECEAE4),
+                  foregroundColor: ink,
+                  child: Icon(Icons.school_outlined, size: 20),
+                ),
+                title: const Text(
+                  'Guía interactiva de bienvenida',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: const Text('Repasa cómo buscar prendas, tallas y comprar'),
+                trailing: const Icon(Icons.chevron_right, size: 18),
+                onTap: () => showWelcomeTour(force: true),
+              ),
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                leading: const CircleAvatar(
+                  backgroundColor: Color(0xFFECEAE4),
+                  foregroundColor: ink,
+                  child: Icon(Icons.auto_awesome_rounded, size: 20),
+                ),
+                title: const Text(
+                  'Guía del Probador Virtual con IA',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: const Text('Aprende a calibrar el acelerómetro a 90°'),
+                trailing: const Icon(Icons.chevron_right, size: 18),
+                onTap: () => showFittingRoomCoach(force: true),
+              ),
               const SizedBox(height: 24),
               if (widget.onSignOut != null) ...[
                 const Divider(),
@@ -1163,10 +1246,17 @@ class _ShopShellState extends State<ShopShell> {
         ),
         const Spacer(),
         IconButton(
+          tooltip: 'Guía rápida de la app',
+          onPressed: () => showWelcomeTour(force: true),
+          icon: const Icon(Icons.help_outline_rounded),
+        ),
+        IconButton(
+          tooltip: 'Buscar en tienda',
           onPressed: () => setState(() => tab = 1),
           icon: const Icon(Icons.search_rounded),
         ),
         IconButton(
+          tooltip: 'Ver mi bolsa',
           onPressed: () => setState(() => tab = 3),
           icon: const Icon(Icons.shopping_basket_outlined),
         ),
@@ -1461,7 +1551,11 @@ class _ShopShellState extends State<ShopShell> {
                 children: [
                   _tag('MODO LAB  /  BETA'),
                   const Spacer(),
-                  const Icon(Icons.help_outline, size: 20),
+                  IconButton(
+                    tooltip: 'Ver guía paso a paso del probador',
+                    onPressed: () => showFittingRoomCoach(force: true),
+                    icon: const Icon(Icons.help_outline, size: 22),
+                  ),
                 ],
               ),
               const SizedBox(height: 16),
@@ -1509,6 +1603,43 @@ class _ShopShellState extends State<ShopShell> {
                       ),
                     ),
                   ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              InkWell(
+                onTap: () => showFittingRoomCoach(force: true),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: line),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF0EFEA),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Icon(Icons.school_outlined, size: 16, color: ink),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          '¿Cómo funciona el probador? Toca aquí para ver la guía con sensor',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: ink,
+                          ),
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right, size: 18, color: muted),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 18),
@@ -1732,6 +1863,33 @@ class _ShopShellState extends State<ShopShell> {
     });
   }
 
+  Widget _cartStepItem(String num, String label, bool active) => Row(
+    children: [
+      CircleAvatar(
+        radius: 10,
+        backgroundColor: active ? ink : const Color(0xFFECEAE4),
+        foregroundColor: active ? lime : muted,
+        child: Text(
+          num,
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.w900,
+            color: active ? lime : muted,
+          ),
+        ),
+      ),
+      const SizedBox(width: 5),
+      Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+          color: active ? ink : muted,
+        ),
+      ),
+    ],
+  );
+
   Widget cart() => CustomScrollView(
     slivers: [
       SliverToBoxAdapter(child: header()),
@@ -1755,6 +1913,30 @@ class _ShopShellState extends State<ShopShell> {
                 style: const TextStyle(color: muted, fontSize: 13),
               ),
             ],
+          ),
+        ),
+      ),
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: line),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _cartStepItem('1', 'Elegir prendas', true),
+                const Icon(Icons.arrow_forward_ios_rounded, size: 11, color: muted),
+                _cartStepItem('2', 'Revisar bolsa', cartCount > 0),
+                const Icon(Icons.arrow_forward_ios_rounded, size: 11, color: muted),
+                _cartStepItem('3', 'Boleta digital', false),
+              ],
+            ),
           ),
         ),
       ),
@@ -1787,6 +1969,29 @@ class _ShopShellState extends State<ShopShell> {
                     onPressed: () => setState(() => tab = 1),
                     style: FilledButton.styleFrom(backgroundColor: ink),
                     child: const Text('IR A LA TIENDA'),
+                  ),
+                  const SizedBox(height: 24),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: line),
+                    ),
+                    child: const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '¿Cómo comprar en 3 pasos simples?',
+                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                        ),
+                        SizedBox(height: 6),
+                        Text(
+                          '1. Entra a "Tienda" y toca una prenda que te guste.\n2. Selecciona tu talla y toca "AÑADIR A LA BOLSA".\n3. Regresa aquí y toca "FINALIZAR COMPRA".',
+                          style: TextStyle(color: muted, fontSize: 11, height: 1.45),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
