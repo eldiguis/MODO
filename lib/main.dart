@@ -13,6 +13,7 @@ import 'data/nearby_store_repository.dart';
 import 'data/product_catalog_repository.dart';
 import 'models/garment.dart';
 import 'models/nearby_store.dart';
+import 'features/admin/admin_login_barrier.dart';
 import 'sensor_camera_guide.dart';
 import 'google_sign_in_web_stub.dart' as google_web
     if (dart.library.html) 'package:google_sign_in_web/web_only.dart';
@@ -113,6 +114,9 @@ class _ModaAppState extends State<ModaApp> {
       colorScheme: ColorScheme.fromSeed(seedColor: ink, surface: paper),
       fontFamily: 'Roboto',
     ),
+    routes: {
+      '/admin': (context) => const AdminLoginBarrier(),
+    },
     home: checkingSession
         ? const Scaffold(
             backgroundColor: paper,
@@ -507,6 +511,17 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
               ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          Center(
+            child: TextButton.icon(
+              onPressed: () => Navigator.of(context).pushNamed('/admin'),
+              icon: const Icon(Icons.shield_outlined, size: 14, color: muted),
+              label: const Text(
+                'Acceso Backoffice Administrador',
+                style: TextStyle(color: muted, fontSize: 11, fontWeight: FontWeight.w600),
+              ),
             ),
           ),
         ],
