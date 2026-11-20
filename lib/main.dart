@@ -14,6 +14,7 @@ import 'data/product_catalog_repository.dart';
 import 'models/garment.dart';
 import 'models/nearby_store.dart';
 import 'sensor_camera_guide.dart';
+import 'features/swipe_to_match/presentation/swipe_to_match_screen.dart';
 import 'google_sign_in_web_stub.dart' as google_web
     if (dart.library.html) 'package:google_sign_in_web/web_only.dart';
 
@@ -1122,8 +1123,14 @@ class _ShopShellState extends State<ShopShell> {
       SliverToBoxAdapter(child: header()),
       SliverToBoxAdapter(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 2, 16, 22),
+          padding: const EdgeInsets.fromLTRB(16, 2, 16, 14),
           child: hero(),
+        ),
+      ),
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+          child: swipeToMatchBanner(),
         ),
       ),
       SliverToBoxAdapter(
@@ -1141,6 +1148,89 @@ class _ShopShellState extends State<ShopShell> {
         ),
       ),
     ],
+  );
+
+  Widget swipeToMatchBanner() => GestureDetector(
+    onTap: () {
+      HapticFeedback.selectionClick();
+      Navigator.of(context).push(
+        _FadeSlideRoute<void>(
+          builder: (_) => SwipeToMatchScreen(
+            catalog: catalogProducts,
+            onAddOutfitToCart: (top, bottom) {
+              setState(() => cartCount += 2);
+            },
+            onTryOutfitInFittingRoom: (top, bottom) {
+              setState(() => tab = 2);
+            },
+          ),
+        ),
+      );
+    },
+    child: Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: ink,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: lime,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.style_outlined, color: ink, size: 26),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: const [
+                    Text(
+                      'IDEA DISRUPTIVA 1',
+                      style: TextStyle(
+                        color: lime,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    SizedBox(width: 6),
+                    Icon(Icons.auto_awesome, color: lime, size: 12),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                const Text(
+                  'Swipe to Match (Outfit Matcher)',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'Desliza prendas superiores e inferiores para armar tu cápsula.',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Icon(
+            Icons.arrow_forward_ios_rounded,
+            color: Colors.white70,
+            size: 14,
+          ),
+        ],
+      ),
+    ),
   );
 
   Widget header() => Padding(
@@ -1162,6 +1252,26 @@ class _ShopShellState extends State<ShopShell> {
           decoration: const BoxDecoration(color: lime, shape: BoxShape.circle),
         ),
         const Spacer(),
+        IconButton(
+          tooltip: 'Swipe to Match',
+          onPressed: () {
+            HapticFeedback.selectionClick();
+            Navigator.of(context).push(
+              _FadeSlideRoute<void>(
+                builder: (_) => SwipeToMatchScreen(
+                  catalog: catalogProducts,
+                  onAddOutfitToCart: (top, bottom) {
+                    setState(() => cartCount += 2);
+                  },
+                  onTryOutfitInFittingRoom: (top, bottom) {
+                    setState(() => tab = 2);
+                  },
+                ),
+              ),
+            );
+          },
+          icon: const Icon(Icons.style_outlined),
+        ),
         IconButton(
           onPressed: () => setState(() => tab = 1),
           icon: const Icon(Icons.search_rounded),
@@ -1914,6 +2024,7 @@ class _ShopShellState extends State<ShopShell> {
       _FadeSlideRoute<void>(
         builder: (_) => ProductDetailPage(
           product: product,
+          catalog: catalogProducts,
           isFavorite: favorites.contains(product.id),
           onToggleFavorite: () => setState(() {
             favorites.contains(product.id)
@@ -1965,6 +2076,7 @@ class _ShopShellState extends State<ShopShell> {
 
 class ProductDetailPage extends StatefulWidget {
   final Garment product;
+  final List<Garment>? catalog;
   final VoidCallback onAddToCart;
   final VoidCallback onTryWithAi;
   final VoidCallback? onOpenCart;
@@ -1974,6 +2086,7 @@ class ProductDetailPage extends StatefulWidget {
   const ProductDetailPage({
     super.key,
     required this.product,
+    this.catalog,
     required this.onAddToCart,
     required this.onTryWithAi,
     this.onOpenCart,
@@ -2243,6 +2356,36 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                       },
                       icon: const Icon(Icons.auto_awesome, size: 16),
                       label: const Text('Probarme esta prenda con IA'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: ink,
+                        side: const BorderSide(color: line),
+                        minimumSize: const Size(double.infinity, 44),
+                        shape: const StadiumBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        Navigator.of(context).push(
+                          _FadeSlideRoute<void>(
+                            builder: (_) => SwipeToMatchScreen(
+                              catalog: widget.catalog ?? [p],
+                              initialGarment: p,
+                              onAddOutfitToCart: (top, bottom) {
+                                widget.onAddToCart();
+                                widget.onAddToCart();
+                              },
+                              onTryOutfitInFittingRoom: (top, bottom) {
+                                Navigator.pop(context);
+                                widget.onTryWithAi();
+                              },
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.style_outlined, size: 16),
+                      label: const Text('Combinar en Swipe to Match'),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: ink,
                         side: const BorderSide(color: line),
