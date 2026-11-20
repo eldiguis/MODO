@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 
@@ -20,7 +21,17 @@ import 'google_sign_in_web_stub.dart' as google_web
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  HttpOverrides.global = _WikimediaFriendlyHttpOverrides();
   runApp(const ModaApp());
+}
+
+class _WikimediaFriendlyHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    final client = super.createHttpClient(context);
+    client.userAgent = 'Mozilla/5.0 (compatible; Flutter)';
+    return client;
+  }
 }
 
 const ink = Color(0xFF171717);
@@ -2204,6 +2215,41 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                       'Una pieza versátil, cómoda y fácil de combinar. Diseñada para acompañarte en cualquier ocasión.',
                       style: TextStyle(color: muted, fontSize: 12, height: 1.5),
                     ),
+                    if (p.store.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF4F3F0),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: line),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.storefront_outlined,
+                              size: 15,
+                              color: ink,
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                'Sede física: ${storeDisplayNames[p.store] ?? p.store}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 11,
+                                  color: ink,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 15),
                     const Text(
                       'TALLA',
@@ -2365,6 +2411,12 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
     );
   }
 }
+
+const Map<String, String> storeDisplayNames = {
+  'store_real_plaza_huancayo': 'MODO - Real Plaza Huancayo',
+  'store_open_plaza_huancayo': 'MODO - Open Plaza Huancayo',
+  'store_plaza_constitucion': 'MODO - Centro Huancayo',
+};
 
 Future<void> openStoreLocation(BuildContext context, String storeId) async {
   if (storeId.trim().isEmpty) return;
