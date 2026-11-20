@@ -592,6 +592,35 @@ class _ShopShellState extends State<ShopShell> {
 
   int get cartCount =>
       cartQuantities.values.fold<int>(0, (total, quantity) => total + quantity);
+
+  double get cartTotalPrice {
+    double sum = 0.0;
+    for (final entry in cartQuantities.entries) {
+      if (entry.value <= 0) continue;
+      final product = catalogProducts.firstWhere(
+        (p) => p.id == entry.key,
+        orElse: () => Garment(
+          id: entry.key,
+          name: 'Prenda MODO',
+          category: 'Ropa',
+          price: 'S/ 0.00',
+          image: '',
+          tag: '',
+        ),
+      );
+      final raw = product.price
+          .replaceAll('S/', '')
+          .replaceAll('s/', '')
+          .replaceAll(r'$', '')
+          .replaceAll(',', '.')
+          .trim();
+      final price = double.tryParse(raw) ?? 0.0;
+      sum += price * entry.value;
+    }
+    return sum;
+  }
+
+  String get formattedCartTotal => 'S/ ${cartTotalPrice.toStringAsFixed(2)}';
   bool largeText = false;
   bool highContrast = false;
   bool reduceMotion = false;
@@ -1735,16 +1764,30 @@ class _ShopShellState extends State<ShopShell> {
         ListTile(
           contentPadding: EdgeInsets.zero,
           leading: ClipRRect(
-            borderRadius: BorderRadius.circular(5),
+            borderRadius: BorderRadius.circular(6),
             child: Image.network(
               photo(product.image, width: 160),
-              width: 70,
-              height: 86,
+              width: 65,
+              height: 80,
               fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => Container(
+                width: 65,
+                height: 80,
+                color: const Color(0xFFF0EFEB),
+                child: const Icon(Icons.checkroom, color: muted),
+              ),
             ),
           ),
-          title: Text(product.name),
-          subtitle: Text('${product.price} · Cantidad: ${entry.value}'),
+          title: Text(
+            product.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          subtitle: Text(
+            '${product.price} · Cantidad: ${entry.value}',
+            style: const TextStyle(color: muted, fontSize: 12),
+          ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1851,7 +1894,7 @@ class _ShopShellState extends State<ShopShell> {
                 ListTile(
                   title: const Text('Subtotal'),
                   trailing: Text(
-                    'S/ ${cartCount * 149}.00',
+                    formattedCartTotal,
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -1923,7 +1966,7 @@ class _ShopShellState extends State<ShopShell> {
           Text('Prendas en orden: $cartCount artículos'),
           const SizedBox(height: 4),
           Text(
-            'Total Pagado: S/ ${cartCount * 149}.00',
+            'Total Pagado: $formattedCartTotal',
             style: const TextStyle(
               fontWeight: FontWeight.w900,
               fontSize: 17,
@@ -2253,41 +2296,6 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                       'Una pieza versátil, cómoda y fácil de combinar. Diseñada para acompañarte en cualquier ocasión.',
                       style: TextStyle(color: muted, fontSize: 12, height: 1.5),
                     ),
-                    if (p.store.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF4F3F0),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: line),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.storefront_outlined,
-                              size: 15,
-                              color: ink,
-                            ),
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                'Sede física: ${storeDisplayNames[p.store] ?? p.store}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 11,
-                                  color: ink,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
                     const SizedBox(height: 15),
                     const Text(
                       'TALLA',
@@ -2578,8 +2586,8 @@ class _NearbyStoresPageState extends State<NearbyStoresPage> {
                 ),
                 const SizedBox(height: 4),
                 const Text(
-                  'Ordenadas por distancia desde tu ubicación.',
-                  style: TextStyle(color: muted),
+                  'Disponibilidad y stock en nuestras tiendas oficiales MODO.',
+                  style: TextStyle(color: muted, fontSize: 13),
                 ),
                 const SizedBox(height: 14),
                 for (final store in stores)
