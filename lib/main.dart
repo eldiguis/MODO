@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'data/nearby_store_repository.dart';
 import 'data/product_catalog_repository.dart';
 import 'models/garment.dart';
@@ -2365,6 +2366,30 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
   }
 }
 
+Future<void> openStoreLocation(BuildContext context, String storeId) async {
+  if (storeId.trim().isEmpty) return;
+  final source = FirestoreNearbyStoreDataSource();
+  final stores = await source.getStores();
+  StoreRecord? store;
+  for (final candidate in stores) {
+    if (candidate.id == storeId) {
+      store = candidate;
+      break;
+    }
+  }
+  if (store == null) return;
+  final uri = Uri.parse(
+    'https://www.google.com/maps/search/?api=1&query=${store.latitude},${store.longitude}',
+  );
+  if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir la app de Google Maps.')),
+      );
+    }
+  }
+}
+
 class NearbyStoresPage extends StatefulWidget {
   const NearbyStoresPage({super.key, required this.product});
 
@@ -2490,6 +2515,11 @@ class _NearbyStoresPageState extends State<NearbyStoresPage> {
                         '${store.openingHours == null ? '' : '\n${store.openingHours}'}',
                       ),
                       isThreeLine: true,
+                      trailing: IconButton(
+                        icon: const Icon(Icons.map_outlined),
+                        tooltip: 'Ver en Google Maps',
+                        onPressed: () => openStoreLocation(context, store.id),
+                      ),
                     ),
                   ),
               ],
