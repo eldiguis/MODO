@@ -19,9 +19,16 @@ import 'sensor_camera_guide.dart';
 import 'google_sign_in_web_stub.dart' as google_web
     if (dart.library.html) 'package:google_sign_in_web/web_only.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   HttpOverrides.global = _WikimediaFriendlyHttpOverrides();
+  if (!kIsWeb) {
+    try {
+      await Firebase.initializeApp();
+    } catch (e, stack) {
+      debugPrint('Firebase init in main failed: $e\n$stack');
+    }
+  }
   runApp(const ModaApp());
 }
 
@@ -57,8 +64,15 @@ class _ModaAppState extends State<ModaApp> {
   @override
   void initState() {
     super.initState();
-    _initFirebase();
-    _loadSavedSession();
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
+    await _initFirebase();
+    await _loadSavedSession();
+    if (mounted) {
+      setState(() => checkingSession = false);
+    }
   }
 
   Future<void> _loadSavedSession() async {
@@ -73,9 +87,6 @@ class _ModaAppState extends State<ModaApp> {
         });
       }
     } catch (_) {}
-    if (mounted) {
-      setState(() => checkingSession = false);
-    }
   }
 
   Future<void> _handleSignIn(String name) async {
@@ -107,7 +118,9 @@ class _ModaAppState extends State<ModaApp> {
   Future<void> _initFirebase() async {
     if (!kIsWeb) {
       try {
-        await Firebase.initializeApp();
+        if (Firebase.apps.isEmpty) {
+          await Firebase.initializeApp();
+        }
         if (mounted) setState(() => firebaseConfigured = true);
       } catch (error, stackTrace) {
         debugPrint('Firebase initialization failed: $error\n$stackTrace');
@@ -632,16 +645,35 @@ class _ShopShellState extends State<ShopShell> {
   Uint8List? frontPhoto, sidePhoto;
   final picker = ImagePicker();
 
+  bool get _isFirebaseReady =>
+      widget.firebaseConfigured || (!kIsWeb && Firebase.apps.isNotEmpty);
+
   @override
   void initState() {
     super.initState();
-    if (!widget.firebaseConfigured) {
+    _startCatalogSubscription();
+  }
+
+  @override
+  void didUpdateWidget(covariant ShopShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if ((!oldWidget.firebaseConfigured && widget.firebaseConfigured) ||
+        (catalogProducts.isEmpty && catalogSubscription == null && _isFirebaseReady)) {
+      _startCatalogSubscription();
+    }
+  }
+
+  void _startCatalogSubscription() {
+    if (!_isFirebaseReady) {
       catalogLoading = false;
       catalogError = kIsWeb
           ? 'La configuración Firebase para web todavía no está agregada.'
           : 'No se pudo iniciar Firebase. Revisa la configuración de Android.';
       return;
     }
+    catalogSubscription?.cancel();
+    catalogLoading = true;
+    catalogError = null;
     catalogSubscription = ProductCatalogRepository().watchProducts().listen(
       (items) {
         if (!mounted) return;
@@ -2421,15 +2453,56 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                       for (var i = 0; i < quantity; i++) {
                         widget.onAddToCart();
                       }
+                      final messenger = ScaffoldMessenger.of(context);
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      messenger.hideCurrentSnackBar();
+                      messenger.showSnackBar(
                         SnackBar(
-                          content: Text('${widget.product.name} añadido a la bolsa'),
-                          duration: const Duration(seconds: 2),
+                          behavior: SnackBarBehavior.floating,
+                          backgroundColor: ink,
+                          elevation: 6,
+                          margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: const BorderSide(color: Color(0xFF2A2A2A), width: 1),
+                          ),
+                          persist: false,
+                          duration: const Duration(seconds: 3),
+                          content: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: const BoxDecoration(
+                                  color: lime,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.check,
+                                  color: ink,
+                                  size: 14,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  '${widget.product.name} añadido a la bolsa',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
                           action: SnackBarAction(
                             label: 'VER BOLSA',
                             textColor: lime,
-                            onPressed: () => widget.onOpenCart?.call(),
+                            onPressed: () {
+                              messenger.hideCurrentSnackBar();
+                              widget.onOpenCart?.call();
+                            },
                           ),
                         ),
                       );
