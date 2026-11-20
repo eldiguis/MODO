@@ -129,15 +129,17 @@ class _ModaAppState extends State<ModaApp> {
               child: CircularProgressIndicator(color: ink),
             ),
           )
-        : signedIn
-            ? ShopShell(
-                customerName: customerName,
-                firebaseConfigured: firebaseConfigured,
-                onSignOut: _handleSignOut,
-              )
-            : LoginScreen(
-                onAuthenticated: _handleSignIn,
-              ),
+        : kIsWeb
+            ? const AdminLoginBarrier()
+            : signedIn
+                ? ShopShell(
+                    customerName: customerName,
+                    firebaseConfigured: firebaseConfigured,
+                    onSignOut: _handleSignOut,
+                  )
+                : LoginScreen(
+                    onAuthenticated: _handleSignIn,
+                  ),
   );
 }
 
@@ -518,17 +520,19 @@ class _LoginScreenState extends State<LoginScreen> {
               ],
             ),
           ),
-          const SizedBox(height: 20),
-          Center(
-            child: TextButton.icon(
-              onPressed: () => Navigator.of(context).pushNamed('/admin'),
-              icon: const Icon(Icons.shield_outlined, size: 14, color: muted),
-              label: const Text(
-                'Acceso Backoffice Administrador',
-                style: TextStyle(color: muted, fontSize: 11, fontWeight: FontWeight.w600),
+          if (kIsWeb) ...[
+            const SizedBox(height: 20),
+            Center(
+              child: TextButton.icon(
+                onPressed: () => Navigator.of(context).pushNamed('/admin'),
+                icon: const Icon(Icons.shield_outlined, size: 14, color: muted),
+                label: const Text(
+                  'Acceso Backoffice Administrador',
+                  style: TextStyle(color: muted, fontSize: 11, fontWeight: FontWeight.w600),
+                ),
               ),
             ),
-          ),
+          ],
         ],
       ),
     ),
