@@ -588,7 +588,10 @@ class _ShopShellState extends State<ShopShell> {
   int tab = 0;
   DateTime? lastBackPressTime;
   String category = 'Todo';
-  int cartCount = 0;
+  final Map<String, int> cartQuantities = {};
+
+  int get cartCount =>
+      cartQuantities.values.fold<int>(0, (total, quantity) => total + quantity);
   bool largeText = false;
   bool highContrast = false;
   bool reduceMotion = false;
@@ -1721,27 +1724,59 @@ class _ShopShellState extends State<ShopShell> {
         ),
       ];
     }
-    return List.generate(cartCount, (index) {
-      final product = catalogProducts[index % catalogProducts.length];
-      return ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(5),
-          child: Image.network(
-            photo(product.image, width: 160),
-            width: 70,
-            height: 86,
-            fit: BoxFit.cover,
+    final items = <Widget>[];
+    for (final entry in cartQuantities.entries) {
+      if (entry.value <= 0) continue;
+      final product = catalogProducts.firstWhere(
+        (p) => p.id == entry.key,
+        orElse: () => catalogProducts.first,
+      );
+      items.add(
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(5),
+            child: Image.network(
+              photo(product.image, width: 160),
+              width: 70,
+              height: 86,
+              fit: BoxFit.cover,
+            ),
+          ),
+          title: Text(product.name),
+          subtitle: Text('${product.price} · Cantidad: ${entry.value}'),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.remove_circle_outline, size: 20),
+                tooltip: 'Reducir cantidad',
+                onPressed: () => setState(() {
+                  if ((cartQuantities[product.id] ?? 0) > 1) {
+                    cartQuantities[product.id] = cartQuantities[product.id]! - 1;
+                  } else {
+                    cartQuantities.remove(product.id);
+                  }
+                }),
+              ),
+              Text(
+                '${entry.value}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              IconButton(
+                icon: const Icon(Icons.add_circle_outline, size: 20),
+                tooltip: 'Aumentar cantidad',
+                onPressed: () => setState(() {
+                  cartQuantities[product.id] =
+                      (cartQuantities[product.id] ?? 0) + 1;
+                }),
+              ),
+            ],
           ),
         ),
-        title: Text(product.name),
-        subtitle: Text(product.price),
-        trailing: IconButton(
-          onPressed: () => setState(() => cartCount--),
-          icon: const Icon(Icons.close),
-        ),
       );
-    });
+    }
+    return items;
   }
 
   Widget cart() => CustomScrollView(
@@ -1906,7 +1941,7 @@ class _ShopShellState extends State<ShopShell> {
         FilledButton(
           onPressed: () {
             Navigator.pop(context);
-            setState(() => cartCount = 0);
+            setState(() => cartQuantities.clear());
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('¡Compra finalizada exitosamente!'),
@@ -1932,7 +1967,10 @@ class _ShopShellState extends State<ShopShell> {
                 ? favorites.remove(product.id)
                 : favorites.add(product.id);
           }),
-          onAddToCart: () => setState(() => cartCount++),
+          onAddToCart: () => setState(() {
+            cartQuantities[product.id] =
+                (cartQuantities[product.id] ?? 0) + 1;
+          }),
           onOpenCart: () => setState(() => tab = 3),
           onTryWithAi: () => setState(() => tab = 2),
         ),
