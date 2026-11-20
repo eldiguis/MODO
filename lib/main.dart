@@ -130,7 +130,7 @@ class _ModaAppState extends State<ModaApp> {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'Grupo5',
+    title: 'MODO',
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       useMaterial3: true,
