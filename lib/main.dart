@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 
@@ -9,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'data/nearby_store_repository.dart';
 import 'data/product_catalog_repository.dart';
 import 'models/garment.dart';
@@ -20,9 +22,26 @@ import 'features/swipe_to_match/presentation/swipe_to_match_screen.dart';
 import 'google_sign_in_web_stub.dart' as google_web
     if (dart.library.html) 'package:google_sign_in_web/web_only.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  HttpOverrides.global = _WikimediaFriendlyHttpOverrides();
+  if (!kIsWeb) {
+    try {
+      await Firebase.initializeApp();
+    } catch (e, stack) {
+      debugPrint('Firebase init in main failed: $e\n$stack');
+    }
+  }
   runApp(const ModaApp());
+}
+
+class _WikimediaFriendlyHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    final client = super.createHttpClient(context);
+    client.userAgent = 'Mozilla/5.0 (compatible; Flutter)';
+    return client;
+  }
 }
 
 const ink = Color(0xFF171717);
@@ -48,8 +67,15 @@ class _ModaAppState extends State<ModaApp> {
   @override
   void initState() {
     super.initState();
-    _initFirebase();
-    _loadSavedSession();
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
+    await _initFirebase();
+    await _loadSavedSession();
+    if (mounted) {
+      setState(() => checkingSession = false);
+    }
   }
 
   Future<void> _loadSavedSession() async {
@@ -64,9 +90,6 @@ class _ModaAppState extends State<ModaApp> {
         });
       }
     } catch (_) {}
-    if (mounted) {
-      setState(() => checkingSession = false);
-    }
   }
 
   Future<void> _handleSignIn(String name) async {
@@ -98,7 +121,9 @@ class _ModaAppState extends State<ModaApp> {
   Future<void> _initFirebase() async {
     if (!kIsWeb) {
       try {
-        await Firebase.initializeApp();
+        if (Firebase.apps.isEmpty) {
+          await Firebase.initializeApp();
+        }
         if (mounted) setState(() => firebaseConfigured = true);
       } catch (error, stackTrace) {
         debugPrint('Firebase initialization failed: $error\n$stackTrace');
@@ -108,7 +133,7 @@ class _ModaAppState extends State<ModaApp> {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'Grupo5',
+    title: 'MODO',
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       useMaterial3: true,
@@ -579,7 +604,39 @@ class _ShopShellState extends State<ShopShell> {
   int tab = 0;
   DateTime? lastBackPressTime;
   String category = 'Todo';
-  int cartCount = 0;
+  final Map<String, int> cartQuantities = {};
+
+  int get cartCount =>
+      cartQuantities.values.fold<int>(0, (total, quantity) => total + quantity);
+
+  double get cartTotalPrice {
+    double sum = 0.0;
+    for (final entry in cartQuantities.entries) {
+      if (entry.value <= 0) continue;
+      final product = catalogProducts.firstWhere(
+        (p) => p.id == entry.key,
+        orElse: () => Garment(
+          id: entry.key,
+          name: 'Prenda MODO',
+          category: 'Ropa',
+          price: 'S/ 0.00',
+          image: '',
+          tag: '',
+        ),
+      );
+      final raw = product.price
+          .replaceAll('S/', '')
+          .replaceAll('s/', '')
+          .replaceAll(r'$', '')
+          .replaceAll(',', '.')
+          .trim();
+      final price = double.tryParse(raw) ?? 0.0;
+      sum += price * entry.value;
+    }
+    return sum;
+  }
+
+  String get formattedCartTotal => 'S/ ${cartTotalPrice.toStringAsFixed(2)}';
   bool largeText = false;
   bool highContrast = false;
   bool reduceMotion = false;
@@ -591,19 +648,38 @@ class _ShopShellState extends State<ShopShell> {
   Uint8List? frontPhoto, sidePhoto;
   final picker = ImagePicker();
 
+  bool get _isFirebaseReady =>
+      widget.firebaseConfigured || (!kIsWeb && Firebase.apps.isNotEmpty);
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkFirstTimeGuides();
     });
-    if (!widget.firebaseConfigured) {
+    _startCatalogSubscription();
+  }
+
+  @override
+  void didUpdateWidget(covariant ShopShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if ((!oldWidget.firebaseConfigured && widget.firebaseConfigured) ||
+        (catalogProducts.isEmpty && catalogSubscription == null && _isFirebaseReady)) {
+      _startCatalogSubscription();
+    }
+  }
+
+  void _startCatalogSubscription() {
+    if (!_isFirebaseReady) {
       catalogLoading = false;
       catalogError = kIsWeb
           ? 'La configuración Firebase para web todavía no está agregada.'
           : 'No se pudo iniciar Firebase. Revisa la configuración de Android.';
       return;
     }
+    catalogSubscription?.cancel();
+    catalogLoading = true;
+    catalogError = null;
     catalogSubscription = ProductCatalogRepository().watchProducts().listen(
       (items) {
         if (!mounted) return;
@@ -1270,7 +1346,10 @@ class _ShopShellState extends State<ShopShell> {
           builder: (_) => SwipeToMatchScreen(
             catalog: catalogProducts,
             onAddOutfitToCart: (top, bottom) {
-              setState(() => cartCount += 2);
+              setState(() {
+                cartQuantities[top.id] = (cartQuantities[top.id] ?? 0) + 1;
+                cartQuantities[bottom.id] = (cartQuantities[bottom.id] ?? 0) + 1;
+              });
             },
             onTryOutfitInFittingRoom: (top, bottom) {
               setState(() => tab = 2);
@@ -1373,7 +1452,10 @@ class _ShopShellState extends State<ShopShell> {
                 builder: (_) => SwipeToMatchScreen(
                   catalog: catalogProducts,
                   onAddOutfitToCart: (top, bottom) {
-                    setState(() => cartCount += 2);
+                    setState(() {
+                      cartQuantities[top.id] = (cartQuantities[top.id] ?? 0) + 1;
+                      cartQuantities[bottom.id] = (cartQuantities[bottom.id] ?? 0) + 1;
+                    });
                   },
                   onTryOutfitInFittingRoom: (top, bottom) {
                     setState(() => tab = 2);
@@ -2000,27 +2082,73 @@ class _ShopShellState extends State<ShopShell> {
         ),
       ];
     }
-    return List.generate(cartCount, (index) {
-      final product = catalogProducts[index % catalogProducts.length];
-      return ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(5),
-          child: Image.network(
-            photo(product.image, width: 160),
-            width: 70,
-            height: 86,
-            fit: BoxFit.cover,
+    final items = <Widget>[];
+    for (final entry in cartQuantities.entries) {
+      if (entry.value <= 0) continue;
+      final product = catalogProducts.firstWhere(
+        (p) => p.id == entry.key,
+        orElse: () => catalogProducts.first,
+      );
+      items.add(
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: Image.network(
+              photo(product.image, width: 160),
+              width: 65,
+              height: 80,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => Container(
+                width: 65,
+                height: 80,
+                color: const Color(0xFFF0EFEB),
+                child: const Icon(Icons.checkroom, color: muted),
+              ),
+            ),
+          ),
+          title: Text(
+            product.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          subtitle: Text(
+            '${product.price} · Cantidad: ${entry.value}',
+            style: const TextStyle(color: muted, fontSize: 12),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.remove_circle_outline, size: 20),
+                tooltip: 'Reducir cantidad',
+                onPressed: () => setState(() {
+                  if ((cartQuantities[product.id] ?? 0) > 1) {
+                    cartQuantities[product.id] = cartQuantities[product.id]! - 1;
+                  } else {
+                    cartQuantities.remove(product.id);
+                  }
+                }),
+              ),
+              Text(
+                '${entry.value}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              IconButton(
+                icon: const Icon(Icons.add_circle_outline, size: 20),
+                tooltip: 'Aumentar cantidad',
+                onPressed: () => setState(() {
+                  cartQuantities[product.id] =
+                      (cartQuantities[product.id] ?? 0) + 1;
+                }),
+              ),
+            ],
           ),
         ),
-        title: Text(product.name),
-        subtitle: Text(product.price),
-        trailing: IconButton(
-          onPressed: () => setState(() => cartCount--),
-          icon: const Icon(Icons.close),
-        ),
       );
-    });
+    }
+    return items;
   }
 
   Widget _cartStepItem(String num, String label, bool active) => Row(
@@ -2169,7 +2297,7 @@ class _ShopShellState extends State<ShopShell> {
                 ListTile(
                   title: const Text('Subtotal'),
                   trailing: Text(
-                    'S/ ${cartCount * 149}.00',
+                    formattedCartTotal,
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -2241,7 +2369,7 @@ class _ShopShellState extends State<ShopShell> {
           Text('Prendas en orden: $cartCount artículos'),
           const SizedBox(height: 4),
           Text(
-            'Total Pagado: S/ ${cartCount * 149}.00',
+            'Total Pagado: $formattedCartTotal',
             style: const TextStyle(
               fontWeight: FontWeight.w900,
               fontSize: 17,
@@ -2259,7 +2387,7 @@ class _ShopShellState extends State<ShopShell> {
         FilledButton(
           onPressed: () {
             Navigator.pop(context);
-            setState(() => cartCount = 0);
+            setState(() => cartQuantities.clear());
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('¡Compra finalizada exitosamente!'),
@@ -2286,7 +2414,10 @@ class _ShopShellState extends State<ShopShell> {
                 ? favorites.remove(product.id)
                 : favorites.add(product.id);
           }),
-          onAddToCart: () => setState(() => cartCount++),
+          onAddToCart: () => setState(() {
+            cartQuantities[product.id] =
+                (cartQuantities[product.id] ?? 0) + 1;
+          }),
           onOpenCart: () => setState(() => tab = 3),
           onTryWithAi: () => setState(() => tab = 2),
         ),
@@ -2743,15 +2874,56 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                       for (var i = 0; i < quantity; i++) {
                         widget.onAddToCart();
                       }
+                      final messenger = ScaffoldMessenger.of(context);
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      messenger.hideCurrentSnackBar();
+                      messenger.showSnackBar(
                         SnackBar(
-                          content: Text('${widget.product.name} añadido a la bolsa'),
-                          duration: const Duration(seconds: 2),
+                          behavior: SnackBarBehavior.floating,
+                          backgroundColor: ink,
+                          elevation: 6,
+                          margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: const BorderSide(color: Color(0xFF2A2A2A), width: 1),
+                          ),
+                          persist: false,
+                          duration: const Duration(seconds: 3),
+                          content: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: const BoxDecoration(
+                                  color: lime,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.check,
+                                  color: ink,
+                                  size: 14,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  '${widget.product.name} añadido a la bolsa',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
                           action: SnackBarAction(
                             label: 'VER BOLSA',
                             textColor: lime,
-                            onPressed: () => widget.onOpenCart?.call(),
+                            onPressed: () {
+                              messenger.hideCurrentSnackBar();
+                              widget.onOpenCart?.call();
+                            },
                           ),
                         ),
                       );
@@ -2777,6 +2949,36 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
         ),
       ),
     );
+  }
+}
+
+const Map<String, String> storeDisplayNames = {
+  'store_real_plaza_huancayo': 'MODO - Real Plaza Huancayo',
+  'store_open_plaza_huancayo': 'MODO - Open Plaza Huancayo',
+  'store_plaza_constitucion': 'MODO - Centro Huancayo',
+};
+
+Future<void> openStoreLocation(BuildContext context, String storeId) async {
+  if (storeId.trim().isEmpty) return;
+  final source = FirestoreNearbyStoreDataSource();
+  final stores = await source.getStores();
+  StoreRecord? store;
+  for (final candidate in stores) {
+    if (candidate.id == storeId) {
+      store = candidate;
+      break;
+    }
+  }
+  if (store == null) return;
+  final uri = Uri.parse(
+    'https://www.google.com/maps/search/?api=1&query=${store.latitude},${store.longitude}',
+  );
+  if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir la app de Google Maps.')),
+      );
+    }
   }
 }
 
@@ -2885,8 +3087,8 @@ class _NearbyStoresPageState extends State<NearbyStoresPage> {
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'Ordenadas por distancia desde tu ubicación.',
-                    style: TextStyle(color: muted),
+                    'Disponibilidad y stock en nuestras tiendas oficiales MODO.',
+                    style: TextStyle(color: muted, fontSize: 13),
                   ),
                   const SizedBox(height: 14),
                   for (final store in stores)
@@ -2912,6 +3114,11 @@ class _NearbyStoresPageState extends State<NearbyStoresPage> {
                         '${store.openingHours == null ? '' : '\n${store.openingHours}'}',
                       ),
                       isThreeLine: true,
+                      trailing: IconButton(
+                        icon: const Icon(Icons.map_outlined),
+                        tooltip: 'Ver en Google Maps',
+                        onPressed: () => openStoreLocation(context, store.id),
+                      ),
                     ),
                   ),
               ],
