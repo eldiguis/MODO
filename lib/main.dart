@@ -15,6 +15,11 @@ import 'data/nearby_store_repository.dart';
 import 'data/product_catalog_repository.dart';
 import 'models/garment.dart';
 import 'models/nearby_store.dart';
+import 'features/admin/admin_login_barrier.dart';
+import 'features/fitting_room/models/body_measurements.dart';
+import 'features/fitting_room/services/fit_predictor_service.dart';
+import 'features/fitting_room/widgets/fit_prediction_card.dart';
+import 'features/fitting_room/widgets/privacy_consent_sheet.dart';
 import 'sensor_camera_guide.dart';
 import 'ui_skeletons.dart';
 import 'user_guide_dialogs.dart';
@@ -141,6 +146,9 @@ class _ModaAppState extends State<ModaApp> {
       colorScheme: ColorScheme.fromSeed(seedColor: ink, surface: paper),
       fontFamily: 'Roboto',
     ),
+    routes: {
+      '/admin': (context) => const AdminLoginBarrier(),
+    },
     home: checkingSession
         ? const Scaffold(
             backgroundColor: paper,
@@ -148,15 +156,17 @@ class _ModaAppState extends State<ModaApp> {
               child: CircularProgressIndicator(color: ink),
             ),
           )
-        : signedIn
-            ? ShopShell(
-                customerName: customerName,
-                firebaseConfigured: firebaseConfigured,
-                onSignOut: _handleSignOut,
-              )
-            : LoginScreen(
-                onAuthenticated: _handleSignIn,
-              ),
+        : kIsWeb
+            ? const AdminLoginBarrier()
+            : signedIn
+                ? ShopShell(
+                    customerName: customerName,
+                    firebaseConfigured: firebaseConfigured,
+                    onSignOut: _handleSignOut,
+                  )
+                : LoginScreen(
+                    onAuthenticated: _handleSignIn,
+                  ),
   );
 }
 
@@ -537,6 +547,19 @@ class _LoginScreenState extends State<LoginScreen> {
               ],
             ),
           ),
+          if (kIsWeb) ...[
+            const SizedBox(height: 20),
+            Center(
+              child: TextButton.icon(
+                onPressed: () => Navigator.of(context).pushNamed('/admin'),
+                icon: const Icon(Icons.shield_outlined, size: 14, color: muted),
+                label: const Text(
+                  'Acceso Backoffice Administrador',
+                  style: TextStyle(color: muted, fontSize: 11, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     ),
@@ -647,6 +670,8 @@ class _ShopShellState extends State<ShopShell> {
   String? catalogError;
   Uint8List? frontPhoto, sidePhoto;
   final picker = ImagePicker();
+  FitPredictionResult? fitPredictionResult;
+  bool isPredictingFit = false;
 
   bool get _isFirebaseReady =>
       widget.firebaseConfigured || (!kIsWeb && Firebase.apps.isNotEmpty);
@@ -654,6 +679,7 @@ class _ShopShellState extends State<ShopShell> {
   @override
   void initState() {
     super.initState();
+    _loadSavedBodyMeasurements();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkFirstTimeGuides();
     });
@@ -743,6 +769,46 @@ class _ShopShellState extends State<ShopShell> {
   void dispose() {
     catalogSubscription?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadSavedBodyMeasurements() async {
+    final m = await BodyMeasurements.loadLocal();
+    if (m != null && mounted) {
+      setState(() {
+        fitPredictionResult = FitPredictionResult(
+          recommendedSize: m.recommendedSize,
+          confidencePercent: (m.confidenceScore * 100).toInt(),
+          fitStyle: 'Medidas Guardadas',
+          measurements: m,
+          explanation: 'Basado en tu última calibración con sensor y silueta.',
+        );
+      });
+    }
+  }
+
+  Future<void> _processFitPrediction(Uint8List imageBytes) async {
+    final hasConsent = await BodyMeasurements.hasAcceptedPrivacy();
+    if (!hasConsent && mounted) {
+      final accepted = await PrivacyConsentSheet.show(context);
+      if (!accepted) return;
+    }
+
+    setState(() => isPredictingFit = true);
+    try {
+      final tempDir = Directory.systemTemp;
+      final tempFile = File('${tempDir.path}/temp_fit_body_${DateTime.now().millisecondsSinceEpoch}.jpg');
+      await tempFile.writeAsBytes(imageBytes);
+
+      final result = await const FitPredictorService().predictFromPhoto(imageFile: tempFile);
+      if (mounted) {
+        setState(() {
+          fitPredictionResult = result;
+          isPredictingFit = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => isPredictingFit = false);
+    }
   }
 
   List<String> get catalogCategories {
@@ -955,6 +1021,9 @@ class _ShopShellState extends State<ShopShell> {
                         sidePhoto = bytes;
                       }
                     });
+                    if (front) {
+                      _processFitPrediction(bytes);
+                    }
                   }
                 },
               ),
@@ -988,6 +1057,9 @@ class _ShopShellState extends State<ShopShell> {
                       sidePhoto = bytes;
                     }
                   });
+                  if (front) {
+                    _processFitPrediction(bytes);
+                  }
                 },
               ),
             ],
@@ -1892,6 +1964,37 @@ class _ShopShellState extends State<ShopShell> {
                   Expanded(child: captureCard(false)),
                 ],
               ),
+              if (isPredictingFit) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: line),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(color: ink, strokeWidth: 2),
+                      ),
+                      SizedBox(width: 12),
+                      Text(
+                        'Analizando silueta y prediciendo talle óptimo...',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: ink),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else if (fitPredictionResult != null) ...[
+                FitPredictionCard(
+                  result: fitPredictionResult!,
+                  onRecalibrate: () => pickCapture(true),
+                ),
+              ],
               const SizedBox(height: 20),
               Container(
                 padding: const EdgeInsets.all(15),
