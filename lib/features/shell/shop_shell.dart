@@ -465,17 +465,9 @@ class _ShopShellState extends State<ShopShell> {
                   ),
                   label: 'Bolsa',
                 ),
-                NavigationDestination(
-                  icon: Badge(
-                    isLabelVisible: favorites.isNotEmpty,
-                    label: Text('${favorites.length}'),
-                    child: const Icon(Icons.person_outline_rounded),
-                  ),
-                  selectedIcon: Badge(
-                    isLabelVisible: favorites.isNotEmpty,
-                    label: Text('${favorites.length}'),
-                    child: const Icon(Icons.person_rounded),
-                  ),
+                const NavigationDestination(
+                  icon: Icon(Icons.person_outline_rounded),
+                  selectedIcon: Icon(Icons.person_rounded),
                   label: 'Cuenta',
                 ),
               ],
