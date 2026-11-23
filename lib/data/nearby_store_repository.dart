@@ -20,31 +20,31 @@ class FirestoreNearbyStoreDataSource implements NearbyStoreDataSource {
 
   static const List<StoreRecord> _fallbackStores = [
     StoreRecord(
-      id: 'store_jockey',
-      name: 'MODO - Jockey Plaza',
-      address: 'Av. Javier Prado Este 4200, Surco',
-      latitude: -12.0864,
-      longitude: -76.9763,
-      phone: '+51 1 712-3456',
+      id: 'store_real_plaza_huancayo',
+      name: 'MODO - Real Plaza Huancayo',
+      address: 'Av. Ferrocarril 1035, Huancayo, Junín',
+      latitude: -12.0564,
+      longitude: -75.2049,
+      phone: '+51 64 234-567',
       openingHours: 'Lun - Dom: 10:00 - 22:00',
     ),
     StoreRecord(
-      id: 'store_salaverry',
-      name: 'MODO - Real Plaza Salaverry',
-      address: 'Av. Salaverry 2370, Jesús María',
-      latitude: -12.0898,
-      longitude: -77.0526,
-      phone: '+51 1 613-7890',
+      id: 'store_open_plaza_huancayo',
+      name: 'MODO - Open Plaza Huancayo',
+      address: 'Av. Evitamiento Norte s/n, El Tambo, Huancayo, Junín',
+      latitude: -12.0408,
+      longitude: -75.2194,
+      phone: '+51 64 245-678',
       openingHours: 'Lun - Dom: 10:00 - 22:00',
     ),
     StoreRecord(
-      id: 'store_san_miguel',
-      name: 'MODO - Plaza San Miguel',
-      address: 'Av. La Marina 2000, San Miguel',
-      latitude: -12.0772,
-      longitude: -77.0805,
-      phone: '+51 1 566-1234',
-      openingHours: 'Lun - Dom: 10:00 - 22:00',
+      id: 'store_plaza_constitucion',
+      name: 'MODO - Centro Huancayo',
+      address: 'Jr. Puno 150, Huancayo, Junín',
+      latitude: -12.0681,
+      longitude: -75.2101,
+      phone: '+51 64 256-789',
+      openingHours: 'Lun - Dom: 10:00 - 21:00',
     ),
   ];
 
@@ -96,8 +96,8 @@ class GeolocatorUserLocationProvider implements UserLocationProvider {
   @override
   Future<UserLocation> getCurrentLocation() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
-      // Si el servicio está apagado pero podemos usar fallback
-      return const UserLocation(-12.0864, -77.0300);
+      // Si el servicio está apagado pero podemos usar fallback en Huancayo
+      return const UserLocation(-12.0651, -75.2049);
     }
 
     var permission = await Geolocator.checkPermission();
@@ -107,8 +107,8 @@ class GeolocatorUserLocationProvider implements UserLocationProvider {
     if (permission == LocationPermission.deniedForever ||
         (permission != LocationPermission.whileInUse &&
             permission != LocationPermission.always)) {
-      // Si el permiso fue denegado, usamos ubicación de Lima centro para no bloquear la pantalla
-      return const UserLocation(-12.0864, -77.0300);
+      // Si el permiso fue denegado, usamos ubicación de Huancayo para no bloquear la pantalla
+      return const UserLocation(-12.0651, -75.2049);
     }
 
     // 1. Obtener de inmediato la última posición conocida (< 50ms)
@@ -129,7 +129,7 @@ class GeolocatorUserLocationProvider implements UserLocationProvider {
       );
       return UserLocation(position.latitude, position.longitude);
     } catch (_) {
-      return const UserLocation(-12.0864, -77.0300);
+      return const UserLocation(-12.0651, -75.2049);
     }
   }
 }

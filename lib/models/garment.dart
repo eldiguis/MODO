@@ -6,6 +6,7 @@ class Garment {
     required this.price,
     required this.image,
     required this.tag,
+    this.store = '',
   });
 
   final String id;
@@ -14,6 +15,10 @@ class Garment {
   final String price;
   final String image;
   final String tag;
+  final String store;
+
+  String get storeId => store;
+  String get tienda => store;
 
   factory Garment.fromMap({
     required String id,
@@ -37,6 +42,16 @@ class Garment {
           ) ??
           '',
       tag: _stringValue(data['tag'] ?? data['etiqueta']) ?? category,
+      store: _stringValue(
+        data['store'] ??
+            data['storeId'] ??
+            data['store_id'] ??
+            data['storeName'] ??
+            data['tienda'] ??
+            data['tiendaId'] ??
+            data['tienda_id'] ??
+            data['tiendaNombre'],
+      ) ?? '',
     );
   }
 

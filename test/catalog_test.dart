@@ -2,11 +2,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_application_1/data/product_catalog_repository.dart';
 
 void main() {
-  test('catalog loads all forty uniquely named Firestore documents', () async {
+  test('catalog loads all fifty uniquely named Firestore documents', () async {
     final repository = ProductCatalogRepository(
       source: _FakeProductCatalogSource(
         List.generate(
-          40,
+          50,
           (index) => ProductCatalogDocument(
             id: 'demo_$index',
             data: {'name': 'Garment $index', 'category': 'Shirts'},
@@ -17,8 +17,8 @@ void main() {
 
     final products = await repository.watchProducts().first;
 
-    expect(products, hasLength(40));
-    expect(products.map((item) => item.name).toSet(), hasLength(40));
+    expect(products, hasLength(50));
+    expect(products.map((item) => item.name).toSet(), hasLength(50));
   });
 }
 

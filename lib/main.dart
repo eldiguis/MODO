@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'data/nearby_store_repository.dart';
 import 'data/product_catalog_repository.dart';
 import 'models/garment.dart';
@@ -20,12 +21,32 @@ import 'features/fitting_room/services/fit_predictor_service.dart';
 import 'features/fitting_room/widgets/fit_prediction_card.dart';
 import 'features/fitting_room/widgets/privacy_consent_sheet.dart';
 import 'sensor_camera_guide.dart';
+import 'ui_skeletons.dart';
+import 'user_guide_dialogs.dart';
+import 'features/swipe_to_match/presentation/swipe_to_match_screen.dart';
 import 'google_sign_in_web_stub.dart' as google_web
     if (dart.library.html) 'package:google_sign_in_web/web_only.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  HttpOverrides.global = _WikimediaFriendlyHttpOverrides();
+  if (!kIsWeb) {
+    try {
+      await Firebase.initializeApp();
+    } catch (e, stack) {
+      debugPrint('Firebase init in main failed: $e\n$stack');
+    }
+  }
   runApp(const ModaApp());
+}
+
+class _WikimediaFriendlyHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    final client = super.createHttpClient(context);
+    client.userAgent = 'Mozilla/5.0 (compatible; Flutter)';
+    return client;
+  }
 }
 
 const ink = Color(0xFF171717);
@@ -51,8 +72,15 @@ class _ModaAppState extends State<ModaApp> {
   @override
   void initState() {
     super.initState();
-    _initFirebase();
-    _loadSavedSession();
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
+    await _initFirebase();
+    await _loadSavedSession();
+    if (mounted) {
+      setState(() => checkingSession = false);
+    }
   }
 
   Future<void> _loadSavedSession() async {
@@ -67,9 +95,6 @@ class _ModaAppState extends State<ModaApp> {
         });
       }
     } catch (_) {}
-    if (mounted) {
-      setState(() => checkingSession = false);
-    }
   }
 
   Future<void> _handleSignIn(String name) async {
@@ -101,7 +126,9 @@ class _ModaAppState extends State<ModaApp> {
   Future<void> _initFirebase() async {
     if (!kIsWeb) {
       try {
-        await Firebase.initializeApp();
+        if (Firebase.apps.isEmpty) {
+          await Firebase.initializeApp();
+        }
         if (mounted) setState(() => firebaseConfigured = true);
       } catch (error, stackTrace) {
         debugPrint('Firebase initialization failed: $error\n$stackTrace');
@@ -111,7 +138,7 @@ class _ModaAppState extends State<ModaApp> {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'Grupo5',
+    title: 'MODO',
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       useMaterial3: true,
@@ -600,7 +627,39 @@ class _ShopShellState extends State<ShopShell> {
   int tab = 0;
   DateTime? lastBackPressTime;
   String category = 'Todo';
-  int cartCount = 0;
+  final Map<String, int> cartQuantities = {};
+
+  int get cartCount =>
+      cartQuantities.values.fold<int>(0, (total, quantity) => total + quantity);
+
+  double get cartTotalPrice {
+    double sum = 0.0;
+    for (final entry in cartQuantities.entries) {
+      if (entry.value <= 0) continue;
+      final product = catalogProducts.firstWhere(
+        (p) => p.id == entry.key,
+        orElse: () => Garment(
+          id: entry.key,
+          name: 'Prenda MODO',
+          category: 'Ropa',
+          price: 'S/ 0.00',
+          image: '',
+          tag: '',
+        ),
+      );
+      final raw = product.price
+          .replaceAll('S/', '')
+          .replaceAll('s/', '')
+          .replaceAll(r'$', '')
+          .replaceAll(',', '.')
+          .trim();
+      final price = double.tryParse(raw) ?? 0.0;
+      sum += price * entry.value;
+    }
+    return sum;
+  }
+
+  String get formattedCartTotal => 'S/ ${cartTotalPrice.toStringAsFixed(2)}';
   bool largeText = false;
   bool highContrast = false;
   bool reduceMotion = false;
@@ -614,17 +673,39 @@ class _ShopShellState extends State<ShopShell> {
   FitPredictionResult? fitPredictionResult;
   bool isPredictingFit = false;
 
+  bool get _isFirebaseReady =>
+      widget.firebaseConfigured || (!kIsWeb && Firebase.apps.isNotEmpty);
+
   @override
   void initState() {
     super.initState();
     _loadSavedBodyMeasurements();
-    if (!widget.firebaseConfigured) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkFirstTimeGuides();
+    });
+    _startCatalogSubscription();
+  }
+
+  @override
+  void didUpdateWidget(covariant ShopShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if ((!oldWidget.firebaseConfigured && widget.firebaseConfigured) ||
+        (catalogProducts.isEmpty && catalogSubscription == null && _isFirebaseReady)) {
+      _startCatalogSubscription();
+    }
+  }
+
+  void _startCatalogSubscription() {
+    if (!_isFirebaseReady) {
       catalogLoading = false;
       catalogError = kIsWeb
           ? 'La configuración Firebase para web todavía no está agregada.'
           : 'No se pudo iniciar Firebase. Revisa la configuración de Android.';
       return;
     }
+    catalogSubscription?.cancel();
+    catalogLoading = true;
+    catalogError = null;
     catalogSubscription = ProductCatalogRepository().watchProducts().listen(
       (items) {
         if (!mounted) return;
@@ -643,6 +724,44 @@ class _ShopShellState extends State<ShopShell> {
           catalogError = 'No se pudo leer la colección productos de Firebase.';
         });
       },
+    );
+  }
+
+  Future<void> _checkFirstTimeGuides() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hasSeen = prefs.getBool('has_seen_welcome_tour') ?? false;
+      if (!hasSeen && mounted) {
+        await prefs.setBool('has_seen_welcome_tour', true);
+        if (mounted) showWelcomeTour();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _checkFittingRoomGuide() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hasSeen = prefs.getBool('has_seen_fitting_coach') ?? false;
+      if (!hasSeen && mounted) {
+        await prefs.setBool('has_seen_fitting_coach', true);
+        if (mounted) showFittingRoomCoach();
+      }
+    } catch (_) {}
+  }
+
+  void showWelcomeTour({bool force = false}) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => const WelcomeTourDialog(),
+    );
+  }
+
+  void showFittingRoomCoach({bool force = false}) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => const FittingRoomCoachDialog(),
     );
   }
 
@@ -737,18 +856,29 @@ class _ShopShellState extends State<ShopShell> {
         ),
       );
 
+  Future<void> _refreshCatalog() async {
+    HapticFeedback.lightImpact();
+    setState(() => catalogLoading = true);
+    await Future.delayed(const Duration(milliseconds: 700));
+    if (mounted) {
+      setState(() => catalogLoading = false);
+    }
+  }
+
   List<Widget> homeProductSection() {
-    if (catalogLoading || catalogError != null || catalogProducts.isEmpty) {
+    if (catalogLoading) {
+      return const [
+        ProductGridSkeleton(count: 4, padding: EdgeInsets.fromLTRB(20, 0, 20, 8)),
+      ];
+    }
+    if (catalogError != null || catalogProducts.isEmpty) {
       return [
         SliverToBoxAdapter(
-          child: catalogNotice(
-            title: catalogLoading
-                ? 'Cargando prendas'
-                : catalogError != null
-                ? 'No se pudo cargar la tienda'
-                : 'Todavía no hay prendas',
-            subtitle:
-                catalogError ?? 'Las prendas de Firebase aparecerán aquí.',
+          child: EditorialEmptyState(
+            title: catalogError != null ? 'Error de conexión' : 'Colección en preparación',
+            message: catalogError ?? 'Estamos preparando las prendas destacadas de esta semana.',
+            actionLabel: 'REINTENTAR',
+            onAction: _refreshCatalog,
           ),
         ),
       ];
@@ -773,17 +903,22 @@ class _ShopShellState extends State<ShopShell> {
   }
 
   List<Widget> shopProductSection() {
-    if (catalogLoading || catalogError != null || visibleProducts.isEmpty) {
+    if (catalogLoading) {
+      return const [
+        ProductGridSkeleton(count: 6, padding: EdgeInsets.fromLTRB(20, 8, 20, 28)),
+      ];
+    }
+    if (catalogError != null || visibleProducts.isEmpty) {
       return [
         SliverToBoxAdapter(
-          child: catalogNotice(
-            title: catalogLoading
-                ? 'Cargando prendas'
-                : catalogError != null
-                ? 'No se pudo cargar la tienda'
-                : 'No hay prendas en esta categoría',
-            subtitle:
-                catalogError ?? 'Revisa tu conexión e intenta nuevamente.',
+          child: EditorialEmptyState(
+            title: catalogError != null ? 'Error de catálogo' : 'No hay prendas disponibles',
+            message: catalogError ?? 'Prueba cambiando de categoría o toca abajo para ver todas.',
+            actionLabel: 'VER TODAS LAS PRENDAS',
+            onAction: () {
+              HapticFeedback.selectionClick();
+              setState(() => category = 'Todo');
+            },
           ),
         ),
       ];
@@ -1007,7 +1142,13 @@ class _ShopShellState extends State<ShopShell> {
               backgroundColor: Colors.white,
               indicatorColor: const Color(0xFFECEAE4),
               selectedIndex: tab,
-              onDestinationSelected: (value) => setState(() => tab = value),
+              onDestinationSelected: (value) {
+                HapticFeedback.selectionClick();
+                setState(() => tab = value);
+                if (value == 2) {
+                  _checkFittingRoomGuide();
+                }
+              },
               destinations: [
                 const NavigationDestination(
                   icon: Icon(Icons.grid_view_outlined),
@@ -1153,6 +1294,42 @@ class _ShopShellState extends State<ShopShell> {
                 value: reduceMotion,
                 onChanged: (value) => setState(() => reduceMotion = value),
               ),
+              const Divider(height: 24),
+              const Text(
+                'Ayuda y Tutoriales',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 6),
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                leading: const CircleAvatar(
+                  backgroundColor: Color(0xFFECEAE4),
+                  foregroundColor: ink,
+                  child: Icon(Icons.school_outlined, size: 20),
+                ),
+                title: const Text(
+                  'Guía interactiva de bienvenida',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: const Text('Repasa cómo buscar prendas, tallas y comprar'),
+                trailing: const Icon(Icons.chevron_right, size: 18),
+                onTap: () => showWelcomeTour(force: true),
+              ),
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                leading: const CircleAvatar(
+                  backgroundColor: Color(0xFFECEAE4),
+                  foregroundColor: ink,
+                  child: Icon(Icons.auto_awesome_rounded, size: 20),
+                ),
+                title: const Text(
+                  'Guía del Probador Virtual con IA',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: const Text('Aprende a calibrar el acelerómetro a 90°'),
+                trailing: const Icon(Icons.chevron_right, size: 18),
+                onTap: () => showFittingRoomCoach(force: true),
+              ),
               const SizedBox(height: 24),
               if (widget.onSignOut != null) ...[
                 const Divider(),
@@ -1190,30 +1367,133 @@ class _ShopShellState extends State<ShopShell> {
     ],
   );
 
-  Widget home() => CustomScrollView(
-    slivers: [
-      SliverToBoxAdapter(child: header()),
-      SliverToBoxAdapter(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 2, 16, 22),
-          child: hero(),
-        ),
+  Widget home() => RefreshIndicator(
+    color: ink,
+    backgroundColor: lime,
+    onRefresh: _refreshCatalog,
+    child: CustomScrollView(
+      physics: const BouncingScrollPhysics(
+        parent: AlwaysScrollableScrollPhysics(),
       ),
-      SliverToBoxAdapter(
-        child: sectionTitle(
-          'Selección de la semana',
-          'Ver todo',
-          () => setState(() => tab = 1),
+      slivers: [
+        SliverToBoxAdapter(child: header()),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 2, 16, 14),
+            child: hero(),
+          ),
         ),
-      ),
-      ...homeProductSection(),
-      SliverToBoxAdapter(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-          child: tryBanner(),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+            child: swipeToMatchBanner(),
+          ),
         ),
+        SliverToBoxAdapter(
+          child: sectionTitle(
+            'Selección de la semana',
+            'Ver todo',
+            () {
+              HapticFeedback.selectionClick();
+              setState(() => tab = 1);
+            },
+          ),
+        ),
+        ...homeProductSection(),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
+            child: tryBanner(),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget swipeToMatchBanner() => GestureDetector(
+    onTap: () {
+      HapticFeedback.selectionClick();
+      Navigator.of(context).push(
+        _FadeSlideRoute<void>(
+          builder: (_) => SwipeToMatchScreen(
+            catalog: catalogProducts,
+            onAddOutfitToCart: (top, bottom) {
+              setState(() {
+                cartQuantities[top.id] = (cartQuantities[top.id] ?? 0) + 1;
+                cartQuantities[bottom.id] = (cartQuantities[bottom.id] ?? 0) + 1;
+              });
+            },
+            onTryOutfitInFittingRoom: (top, bottom) {
+              setState(() => tab = 2);
+            },
+          ),
+        ),
+      );
+    },
+    child: Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: ink,
+        borderRadius: BorderRadius.circular(14),
       ),
-    ],
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: lime,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.style_outlined, color: ink, size: 26),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: const [
+                    Text(
+                      'IDEA DISRUPTIVA 1',
+                      style: TextStyle(
+                        color: lime,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    SizedBox(width: 6),
+                    Icon(Icons.auto_awesome, color: lime, size: 12),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                const Text(
+                  'Swipe to Match (Outfit Matcher)',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'Desliza prendas superiores e inferiores para armar tu cápsula.',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Icon(
+            Icons.arrow_forward_ios_rounded,
+            color: Colors.white70,
+            size: 14,
+          ),
+        ],
+      ),
+    ),
   );
 
   Widget header() => Padding(
@@ -1236,10 +1516,40 @@ class _ShopShellState extends State<ShopShell> {
         ),
         const Spacer(),
         IconButton(
+          tooltip: 'Swipe to Match',
+          onPressed: () {
+            HapticFeedback.selectionClick();
+            Navigator.of(context).push(
+              _FadeSlideRoute<void>(
+                builder: (_) => SwipeToMatchScreen(
+                  catalog: catalogProducts,
+                  onAddOutfitToCart: (top, bottom) {
+                    setState(() {
+                      cartQuantities[top.id] = (cartQuantities[top.id] ?? 0) + 1;
+                      cartQuantities[bottom.id] = (cartQuantities[bottom.id] ?? 0) + 1;
+                    });
+                  },
+                  onTryOutfitInFittingRoom: (top, bottom) {
+                    setState(() => tab = 2);
+                  },
+                ),
+              ),
+            );
+          },
+          icon: const Icon(Icons.style_outlined),
+        ),
+        IconButton(
+          tooltip: 'Guía rápida de la app',
+          onPressed: () => showWelcomeTour(force: true),
+          icon: const Icon(Icons.help_outline_rounded),
+        ),
+        IconButton(
+          tooltip: 'Buscar en tienda',
           onPressed: () => setState(() => tab = 1),
           icon: const Icon(Icons.search_rounded),
         ),
         IconButton(
+          tooltip: 'Ver mi bolsa',
           onPressed: () => setState(() => tab = 3),
           icon: const Icon(Icons.shopping_basket_outlined),
         ),
@@ -1342,7 +1652,10 @@ class _ShopShellState extends State<ShopShell> {
 
   Widget productCardItem(Garment p) {
     return GestureDetector(
-      onTap: () => showProduct(p),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        showProduct(p);
+      },
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1350,17 +1663,20 @@ class _ShopShellState extends State<ShopShell> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(7),
-                  child: Image.network(
-                    photo(p.image, width: 600),
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => Container(
-                      color: const Color(0xFFE3E0D8),
-                      child: const Icon(
-                        Icons.checkroom,
-                        size: 58,
-                        color: muted,
+                Hero(
+                  tag: 'garment_photo_${p.id}',
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(7),
+                    child: Image.network(
+                      photo(p.image, width: 600),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Container(
+                        color: const Color(0xFFE3E0D8),
+                        child: const Icon(
+                          Icons.checkroom,
+                          size: 58,
+                          color: muted,
+                        ),
                       ),
                     ),
                   ),
@@ -1370,11 +1686,14 @@ class _ShopShellState extends State<ShopShell> {
                   top: 4,
                   right: 4,
                   child: IconButton.filledTonal(
-                    onPressed: () => setState(
-                      () => favorites.contains(p.id)
-                          ? favorites.remove(p.id)
-                          : favorites.add(p.id),
-                    ),
+                    onPressed: () {
+                      HapticFeedback.lightImpact();
+                      setState(
+                        () => favorites.contains(p.id)
+                            ? favorites.remove(p.id)
+                            : favorites.add(p.id),
+                      );
+                    },
                     icon: Icon(
                       favorites.contains(p.id)
                           ? Icons.favorite
@@ -1470,55 +1789,67 @@ class _ShopShellState extends State<ShopShell> {
     ),
   );
 
-  Widget shop() => CustomScrollView(
-    slivers: [
-      SliverToBoxAdapter(child: header()),
-      SliverToBoxAdapter(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Encuentra tu\npróximo favorito.',
-                style: TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 30,
-                  height: 1.05,
-                  letterSpacing: -.8,
+  Widget shop() => RefreshIndicator(
+    color: ink,
+    backgroundColor: lime,
+    onRefresh: _refreshCatalog,
+    child: CustomScrollView(
+      physics: const BouncingScrollPhysics(
+        parent: AlwaysScrollableScrollPhysics(),
+      ),
+      slivers: [
+        SliverToBoxAdapter(child: header()),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Encuentra tu\npróximo favorito.',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 30,
+                    height: 1.05,
+                    letterSpacing: -.8,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 20),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: catalogCategories
-                      .map(
-                        (c) => Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ChoiceChip(
-                            label: Text(c),
-                            selected: category == c,
-                            onSelected: (_) => setState(() => category = c),
-                            selectedColor: ink,
-                            labelStyle: TextStyle(
-                              color: category == c ? Colors.white : ink,
-                              fontWeight: FontWeight.w600,
+                const SizedBox(height: 20),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  child: Row(
+                    children: catalogCategories
+                        .map(
+                          (c) => Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(c),
+                              selected: category == c,
+                              onSelected: (_) {
+                                HapticFeedback.selectionClick();
+                                setState(() => category = c);
+                              },
+                              selectedColor: ink,
+                              labelStyle: TextStyle(
+                                color: category == c ? Colors.white : ink,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              backgroundColor: Colors.white,
+                              side: const BorderSide(color: line),
                             ),
-                            backgroundColor: Colors.white,
-                            side: const BorderSide(color: line),
                           ),
-                        ),
-                      )
-                      .toList(),
+                        )
+                        .toList(),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
-      ...shopProductSection(),
-    ],
+        ...shopProductSection(),
+      ],
+    ),
   );
 
   Widget fittingRoom() => CustomScrollView(
@@ -1534,7 +1865,11 @@ class _ShopShellState extends State<ShopShell> {
                 children: [
                   _tag('MODO LAB  /  BETA'),
                   const Spacer(),
-                  const Icon(Icons.help_outline, size: 20),
+                  IconButton(
+                    tooltip: 'Ver guía paso a paso del probador',
+                    onPressed: () => showFittingRoomCoach(force: true),
+                    icon: const Icon(Icons.help_outline, size: 22),
+                  ),
                 ],
               ),
               const SizedBox(height: 16),
@@ -1582,6 +1917,43 @@ class _ShopShellState extends State<ShopShell> {
                       ),
                     ),
                   ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              InkWell(
+                onTap: () => showFittingRoomCoach(force: true),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: line),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF0EFEA),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Icon(Icons.school_outlined, size: 16, color: ink),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          '¿Cómo funciona el probador? Toca aquí para ver la guía con sensor',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: ink,
+                          ),
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right, size: 18, color: muted),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 18),
@@ -1813,28 +2185,101 @@ class _ShopShellState extends State<ShopShell> {
         ),
       ];
     }
-    return List.generate(cartCount, (index) {
-      final product = catalogProducts[index % catalogProducts.length];
-      return ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(5),
-          child: Image.network(
-            photo(product.image, width: 160),
-            width: 70,
-            height: 86,
-            fit: BoxFit.cover,
+    final items = <Widget>[];
+    for (final entry in cartQuantities.entries) {
+      if (entry.value <= 0) continue;
+      final product = catalogProducts.firstWhere(
+        (p) => p.id == entry.key,
+        orElse: () => catalogProducts.first,
+      );
+      items.add(
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: Image.network(
+              photo(product.image, width: 160),
+              width: 65,
+              height: 80,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => Container(
+                width: 65,
+                height: 80,
+                color: const Color(0xFFF0EFEB),
+                child: const Icon(Icons.checkroom, color: muted),
+              ),
+            ),
+          ),
+          title: Text(
+            product.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          subtitle: Text(
+            '${product.price} · Cantidad: ${entry.value}',
+            style: const TextStyle(color: muted, fontSize: 12),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.remove_circle_outline, size: 20),
+                tooltip: 'Reducir cantidad',
+                onPressed: () => setState(() {
+                  if ((cartQuantities[product.id] ?? 0) > 1) {
+                    cartQuantities[product.id] = cartQuantities[product.id]! - 1;
+                  } else {
+                    cartQuantities.remove(product.id);
+                  }
+                }),
+              ),
+              Text(
+                '${entry.value}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              IconButton(
+                icon: const Icon(Icons.add_circle_outline, size: 20),
+                tooltip: 'Aumentar cantidad',
+                onPressed: () => setState(() {
+                  cartQuantities[product.id] =
+                      (cartQuantities[product.id] ?? 0) + 1;
+                }),
+              ),
+            ],
           ),
         ),
-        title: Text(product.name),
-        subtitle: Text(product.price),
-        trailing: IconButton(
-          onPressed: () => setState(() => cartCount--),
-          icon: const Icon(Icons.close),
-        ),
       );
-    });
+    }
+    return items;
   }
+
+  Widget _cartStepItem(String num, String label, bool active) => Row(
+    children: [
+      CircleAvatar(
+        radius: 10,
+        backgroundColor: active ? ink : const Color(0xFFECEAE4),
+        foregroundColor: active ? lime : muted,
+        child: Text(
+          num,
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.w900,
+            color: active ? lime : muted,
+          ),
+        ),
+      ),
+      const SizedBox(width: 5),
+      Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+          color: active ? ink : muted,
+        ),
+      ),
+    ],
+  );
 
   Widget cart() => CustomScrollView(
     slivers: [
@@ -1859,6 +2304,30 @@ class _ShopShellState extends State<ShopShell> {
                 style: const TextStyle(color: muted, fontSize: 13),
               ),
             ],
+          ),
+        ),
+      ),
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: line),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _cartStepItem('1', 'Elegir prendas', true),
+                const Icon(Icons.arrow_forward_ios_rounded, size: 11, color: muted),
+                _cartStepItem('2', 'Revisar bolsa', cartCount > 0),
+                const Icon(Icons.arrow_forward_ios_rounded, size: 11, color: muted),
+                _cartStepItem('3', 'Boleta digital', false),
+              ],
+            ),
           ),
         ),
       ),
@@ -1892,6 +2361,29 @@ class _ShopShellState extends State<ShopShell> {
                     style: FilledButton.styleFrom(backgroundColor: ink),
                     child: const Text('IR A LA TIENDA'),
                   ),
+                  const SizedBox(height: 24),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: line),
+                    ),
+                    child: const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '¿Cómo comprar en 3 pasos simples?',
+                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                        ),
+                        SizedBox(height: 6),
+                        Text(
+                          '1. Entra a "Tienda" y toca una prenda que te guste.\n2. Selecciona tu talla y toca "AÑADIR A LA BOLSA".\n3. Regresa aquí y toca "FINALIZAR COMPRA".',
+                          style: TextStyle(color: muted, fontSize: 11, height: 1.45),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1908,7 +2400,7 @@ class _ShopShellState extends State<ShopShell> {
                 ListTile(
                   title: const Text('Subtotal'),
                   trailing: Text(
-                    'S/ ${cartCount * 149}.00',
+                    formattedCartTotal,
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -1980,7 +2472,7 @@ class _ShopShellState extends State<ShopShell> {
           Text('Prendas en orden: $cartCount artículos'),
           const SizedBox(height: 4),
           Text(
-            'Total Pagado: S/ ${cartCount * 149}.00',
+            'Total Pagado: $formattedCartTotal',
             style: const TextStyle(
               fontWeight: FontWeight.w900,
               fontSize: 17,
@@ -1998,7 +2490,7 @@ class _ShopShellState extends State<ShopShell> {
         FilledButton(
           onPressed: () {
             Navigator.pop(context);
-            setState(() => cartCount = 0);
+            setState(() => cartQuantities.clear());
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('¡Compra finalizada exitosamente!'),
@@ -2018,13 +2510,17 @@ class _ShopShellState extends State<ShopShell> {
       _FadeSlideRoute<void>(
         builder: (_) => ProductDetailPage(
           product: product,
+          catalog: catalogProducts,
           isFavorite: favorites.contains(product.id),
           onToggleFavorite: () => setState(() {
             favorites.contains(product.id)
                 ? favorites.remove(product.id)
                 : favorites.add(product.id);
           }),
-          onAddToCart: () => setState(() => cartCount++),
+          onAddToCart: () => setState(() {
+            cartQuantities[product.id] =
+                (cartQuantities[product.id] ?? 0) + 1;
+          }),
           onOpenCart: () => setState(() => tab = 3),
           onTryWithAi: () => setState(() => tab = 2),
         ),
@@ -2069,6 +2565,7 @@ class _ShopShellState extends State<ShopShell> {
 
 class ProductDetailPage extends StatefulWidget {
   final Garment product;
+  final List<Garment>? catalog;
   final VoidCallback onAddToCart;
   final VoidCallback onTryWithAi;
   final VoidCallback? onOpenCart;
@@ -2078,6 +2575,7 @@ class ProductDetailPage extends StatefulWidget {
   const ProductDetailPage({
     super.key,
     required this.product,
+    this.catalog,
     required this.onAddToCart,
     required this.onTryWithAi,
     this.onOpenCart,
@@ -2149,17 +2647,20 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.network(
-                          photo(images[imageIndex], width: 950),
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => Container(
-                            color: const Color(0xFFECEAE4),
-                            child: const Icon(
-                              Icons.checkroom,
-                              size: 72,
-                              color: muted,
+                      Hero(
+                        tag: 'garment_photo_${p.id}',
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.network(
+                            photo(images[imageIndex], width: 950),
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => Container(
+                              color: const Color(0xFFECEAE4),
+                              child: const Icon(
+                                Icons.checkroom,
+                                size: 72,
+                                color: muted,
+                              ),
                             ),
                           ),
                         ),
@@ -2324,7 +2825,10 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                             (value) => ChoiceChip(
                               label: Text(value),
                               selected: size == value,
-                              onSelected: (_) => setState(() => size = value),
+                              onSelected: (_) {
+                                HapticFeedback.selectionClick();
+                                setState(() => size = value);
+                              },
                               selectedColor: ink,
                               backgroundColor: Colors.white,
                               side: BorderSide(
@@ -2342,6 +2846,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                     const SizedBox(height: 16),
                     OutlinedButton.icon(
                       onPressed: () {
+                        HapticFeedback.lightImpact();
                         Navigator.pop(context);
                         widget.onTryWithAi();
                       },
@@ -2356,11 +2861,44 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                     ),
                     const SizedBox(height: 8),
                     OutlinedButton.icon(
-                      onPressed: () => Navigator.of(context).push(
-                        _FadeSlideRoute<void>(
-                          builder: (_) => NearbyStoresPage(product: p),
-                        ),
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        Navigator.of(context).push(
+                          _FadeSlideRoute<void>(
+                            builder: (_) => SwipeToMatchScreen(
+                              catalog: widget.catalog ?? [p],
+                              initialGarment: p,
+                              onAddOutfitToCart: (top, bottom) {
+                                widget.onAddToCart();
+                                widget.onAddToCart();
+                              },
+                              onTryOutfitInFittingRoom: (top, bottom) {
+                                Navigator.pop(context);
+                                widget.onTryWithAi();
+                              },
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.style_outlined, size: 16),
+                      label: const Text('Combinar en Swipe to Match'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: ink,
+                        side: const BorderSide(color: line),
+                        minimumSize: const Size(double.infinity, 44),
+                        shape: const StadiumBorder(),
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        Navigator.of(context).push(
+                          _FadeSlideRoute<void>(
+                            builder: (_) => NearbyStoresPage(product: p),
+                          ),
+                        );
+                      },
                       icon: const Icon(Icons.location_on_outlined, size: 17),
                       label: const Text('Ver tiendas cercanas con stock'),
                       style: OutlinedButton.styleFrom(
@@ -2397,7 +2935,10 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                   children: [
                     IconButton(
                       onPressed: quantity > 1
-                          ? () => setState(() => quantity--)
+                          ? () {
+                              HapticFeedback.selectionClick();
+                              setState(() => quantity--);
+                            }
                           : null,
                       icon: const Icon(
                         Icons.remove,
@@ -2413,7 +2954,10 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                       ),
                     ),
                     IconButton(
-                      onPressed: () => setState(() => quantity++),
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        setState(() => quantity++);
+                      },
                       icon: const Icon(
                         Icons.add,
                         color: Colors.white,
@@ -2429,18 +2973,60 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                   height: 48,
                   child: FilledButton(
                     onPressed: () {
+                      HapticFeedback.mediumImpact();
                       for (var i = 0; i < quantity; i++) {
                         widget.onAddToCart();
                       }
+                      final messenger = ScaffoldMessenger.of(context);
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      messenger.hideCurrentSnackBar();
+                      messenger.showSnackBar(
                         SnackBar(
-                          content: Text('${widget.product.name} añadido a la bolsa'),
-                          duration: const Duration(seconds: 2),
+                          behavior: SnackBarBehavior.floating,
+                          backgroundColor: ink,
+                          elevation: 6,
+                          margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: const BorderSide(color: Color(0xFF2A2A2A), width: 1),
+                          ),
+                          persist: false,
+                          duration: const Duration(seconds: 3),
+                          content: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: const BoxDecoration(
+                                  color: lime,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.check,
+                                  color: ink,
+                                  size: 14,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  '${widget.product.name} añadido a la bolsa',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
                           action: SnackBarAction(
                             label: 'VER BOLSA',
                             textColor: lime,
-                            onPressed: () => widget.onOpenCart?.call(),
+                            onPressed: () {
+                              messenger.hideCurrentSnackBar();
+                              widget.onOpenCart?.call();
+                            },
                           ),
                         ),
                       );
@@ -2466,6 +3052,36 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
         ),
       ),
     );
+  }
+}
+
+const Map<String, String> storeDisplayNames = {
+  'store_real_plaza_huancayo': 'MODO - Real Plaza Huancayo',
+  'store_open_plaza_huancayo': 'MODO - Open Plaza Huancayo',
+  'store_plaza_constitucion': 'MODO - Centro Huancayo',
+};
+
+Future<void> openStoreLocation(BuildContext context, String storeId) async {
+  if (storeId.trim().isEmpty) return;
+  final source = FirestoreNearbyStoreDataSource();
+  final stores = await source.getStores();
+  StoreRecord? store;
+  for (final candidate in stores) {
+    if (candidate.id == storeId) {
+      store = candidate;
+      break;
+    }
+  }
+  if (store == null) return;
+  final uri = Uri.parse(
+    'https://www.google.com/maps/search/?api=1&query=${store.latitude},${store.longitude}',
+  );
+  if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir la app de Google Maps.')),
+      );
+    }
   }
 }
 
@@ -2532,7 +3148,7 @@ class _NearbyStoresPageState extends State<NearbyStoresPage> {
     ),
     body: SafeArea(
       child: loading
-          ? const Center(child: CircularProgressIndicator(color: ink))
+          ? const StoreListSkeleton()
           : error != null
           ? _message(
               icon: Icons.location_disabled_outlined,
@@ -2555,24 +3171,31 @@ class _NearbyStoresPageState extends State<NearbyStoresPage> {
               action: 'ACTUALIZAR',
               onPressed: loadStores,
             )
-          : ListView(
-              padding: const EdgeInsets.all(18),
-              children: [
-                Text(
-                  widget.product.name,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
+          : RefreshIndicator(
+              color: ink,
+              backgroundColor: lime,
+              onRefresh: loadStores,
+              child: ListView(
+                physics: const BouncingScrollPhysics(
+                  parent: AlwaysScrollableScrollPhysics(),
+                ),
+                padding: const EdgeInsets.all(18),
+                children: [
+                  Text(
+                    widget.product.name,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Ordenadas por distancia desde tu ubicación.',
-                  style: TextStyle(color: muted),
-                ),
-                const SizedBox(height: 14),
-                for (final store in stores)
-                  Card(
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Disponibilidad y stock en nuestras tiendas oficiales MODO.',
+                    style: TextStyle(color: muted, fontSize: 13),
+                  ),
+                  const SizedBox(height: 14),
+                  for (final store in stores)
+                    Card(
                     color: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
@@ -2594,10 +3217,16 @@ class _NearbyStoresPageState extends State<NearbyStoresPage> {
                         '${store.openingHours == null ? '' : '\n${store.openingHours}'}',
                       ),
                       isThreeLine: true,
+                      trailing: IconButton(
+                        icon: const Icon(Icons.map_outlined),
+                        tooltip: 'Ver en Google Maps',
+                        onPressed: () => openStoreLocation(context, store.id),
+                      ),
                     ),
                   ),
               ],
             ),
+          ),
     ),
   );
 
