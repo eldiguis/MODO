@@ -1,8 +1,10 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../../models/garment.dart';
+import '../../catalog/models/garment.dart';
+import '../../onboarding/user_guide_dialogs.dart';
 import '../models/capsule_outfit.dart';
 
 const Color _kInk = Color(0xFF171717);
@@ -60,6 +62,26 @@ class _SwipeToMatchScreenState extends State<SwipeToMatchScreen> {
     _bottomController = PageController(
       initialPage: _currentBottomIndex,
       viewportFraction: 0.82,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkFirstTimeGuide());
+  }
+
+  Future<void> _checkFirstTimeGuide() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hasSeen = prefs.getBool('has_seen_swipe_to_match_guide') ?? false;
+      if (!hasSeen && mounted) {
+        await prefs.setBool('has_seen_swipe_to_match_guide', true);
+        _showGuide();
+      }
+    } catch (_) {}
+  }
+
+  void _showGuide() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => const SwipeToMatchGuideDialog(),
     );
   }
 
@@ -177,6 +199,11 @@ class _SwipeToMatchScreenState extends State<SwipeToMatchScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            onPressed: _showGuide,
+            icon: const Icon(Icons.help_outline, color: _kInk),
+            tooltip: 'Guía de Swipe to Match',
+          ),
           IconButton(
             onPressed: _shuffleOutfit,
             icon: const Icon(Icons.casino_outlined, color: _kInk),
