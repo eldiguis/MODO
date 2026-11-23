@@ -1,5 +1,5 @@
 import 'dart:math' as math;
-import '../../../models/garment.dart';
+import '../../catalog/models/garment.dart';
 
 /// Representa una combinación de dos prendas (superior e inferior)
 /// creada dentro de la experiencia interactiva "Swipe to Match".

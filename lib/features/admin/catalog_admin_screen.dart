@@ -483,12 +483,28 @@ class _ProductFormDialogState extends State<_ProductFormDialog> {
   bool _inStock = true;
   bool _isSaving = false;
 
-  final Map<String, bool> _sizes = {
-    'S': true,
-    'M': true,
-    'L': true,
-    'XL': false,
-  };
+  final Map<String, bool> _sizes = {};
+
+  void _populateSizesForCategory(String cat, [List? existing]) {
+    _sizes.clear();
+    final c = cat.toLowerCase();
+    List<String> sizeKeys;
+    if (c.contains('calzado') || c.contains('zapato')) {
+      sizeKeys = ['36', '37', '38', '39', '40', '41', '42', '43'];
+    } else if (c.contains('accesorio') || c.contains('bolso')) {
+      sizeKeys = ['Única'];
+    } else {
+      sizeKeys = ['S', 'M', 'L', 'XL', 'XXL'];
+    }
+
+    for (final s in sizeKeys) {
+      if (existing != null && existing.isNotEmpty) {
+        _sizes[s] = existing.contains(s);
+      } else {
+        _sizes[s] = true;
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -501,11 +517,10 @@ class _ProductFormDialogState extends State<_ProductFormDialog> {
     _category = p['category'] ?? p['categoria'] ?? 'Sacos';
     _inStock = p['inStock'] ?? p['disponible'] ?? true;
 
-    if (p['sizes'] is List) {
-      for (final s in ['S', 'M', 'L', 'XL']) {
-        _sizes[s] = (p['sizes'] as List).contains(s);
-      }
-    }
+    _populateSizesForCategory(
+      _category,
+      p['sizes'] is List ? p['sizes'] as List : null,
+    );
   }
 
   @override
@@ -605,7 +620,12 @@ class _ProductFormDialogState extends State<_ProductFormDialog> {
                           DropdownMenuItem(value: 'Accesorios', child: Text('Accesorios')),
                         ],
                         onChanged: (val) {
-                          if (val != null) setState(() => _category = val);
+                          if (val != null) {
+                            setState(() {
+                              _category = val;
+                              _populateSizesForCategory(val);
+                            });
+                          }
                         },
                       ),
                     ),
