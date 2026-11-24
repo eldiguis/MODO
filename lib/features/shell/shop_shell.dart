@@ -16,7 +16,9 @@ import '../catalog/models/garment.dart';
 import '../catalog/product_detail_page.dart';
 import '../fitting_room/models/body_measurements.dart';
 import '../fitting_room/sensor_camera_guide.dart';
+import '../fitting_room/services/ai_fitting_service.dart';
 import '../fitting_room/services/fit_predictor_service.dart';
+import '../fitting_room/widgets/ai_config_dialog.dart';
 import '../fitting_room/widgets/fit_prediction_card.dart';
 import '../fitting_room/widgets/privacy_consent_sheet.dart';
 import '../onboarding/user_guide_dialogs.dart';
@@ -166,6 +168,41 @@ class _ShopShellState extends State<ShopShell> {
   int selectedLook = 0;
   Garment? activeFittingGarment;
   Garment? activeFittingBottomGarment;
+  final _aiFittingService = const AiFittingService();
+  AiApiConfig? _aiConfig;
+  bool _isGeneratingLook = false;
+
+  Future<void> _loadAiConfig() async {
+    final cfg = await _aiFittingService.loadConfig();
+    if (mounted) setState(() => _aiConfig = cfg);
+  }
+
+  void _showAiConfigDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AiConfigDialog(
+        initialConfig: _aiConfig ??
+            const AiApiConfig(provider: AiProvider.aiStudio, apiKey: ''),
+        onSaved: (newConfig) async {
+          await _aiFittingService.saveConfig(
+            provider: newConfig.provider,
+            apiKey: newConfig.apiKey,
+            endpoint: newConfig.endpoint,
+          );
+          if (mounted) {
+            setState(() => _aiConfig = newConfig);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'API de ${newConfig.provider == AiProvider.aiStudio ? "Google AI Studio" : "NanoBanana"} guardada con éxito.',
+                ),
+              ),
+            );
+          }
+        },
+      ),
+    );
+  }
 
   void _loadGarmentIntoFitting(Garment garment) {
     setState(() {
@@ -342,6 +379,7 @@ class _ShopShellState extends State<ShopShell> {
   void initState() {
     super.initState();
     _loadSavedBodyMeasurements();
+    _loadAiConfig();
     _loadFavorites();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkFirstTimeGuides());
     _startCatalogSubscription();
@@ -912,6 +950,93 @@ class _ShopShellState extends State<ShopShell> {
                     ),
                   ),
                   const SizedBox(height: 18),
+                  InkWell(
+                    onTap: _showAiConfigDialog,
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 11),
+                      decoration: BoxDecoration(
+                        color: (_aiConfig?.isConfigured ?? false)
+                            ? const Color(0xFFF7FDF0)
+                            : Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: (_aiConfig?.isConfigured ?? false)
+                              ? const Color(0xFFCBE896)
+                              : line,
+                          width: (_aiConfig?.isConfigured ?? false) ? 1.5 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: (_aiConfig?.isConfigured ?? false)
+                                  ? lime
+                                  : const Color(0xFFECEAE4),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Icon(
+                              Icons.key_rounded,
+                              size: 16,
+                              color: (_aiConfig?.isConfigured ?? false) ? ink : muted,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      (_aiConfig?.isConfigured ?? false)
+                                          ? 'Motor IA: ${_aiConfig!.provider == AiProvider.aiStudio ? "Google AI Studio" : "NanoBanana"}'
+                                          : 'Configurar API Key (AI Studio / NanoBanana)',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                        color: ink,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    if (_aiConfig?.isConfigured ?? false)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 5, vertical: 1),
+                                        decoration: BoxDecoration(
+                                          color: ink,
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: const Text(
+                                          'ACTIVA',
+                                          style: TextStyle(
+                                            fontSize: 8,
+                                            fontWeight: FontWeight.w900,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  (_aiConfig?.isConfigured ?? false)
+                                      ? 'Toca para cambiar proveedor o actualizar clave'
+                                      : 'Sube tu clave para generar looks con IA en alta resolución',
+                                  style: const TextStyle(fontSize: 11, color: muted),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.settings_outlined, size: 18, color: ink),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
                   Row(
                     children: [
                       Expanded(child: _captureCard(true)),
@@ -1027,14 +1152,26 @@ class _ShopShellState extends State<ShopShell> {
                     width: double.infinity,
                     height: 54,
                     child: FilledButton.icon(
-                      onPressed:
-                          frontPhoto != null && sidePhoto != null
-                              ? _showPreview
-                              : null,
-                      icon: const Icon(Icons.auto_awesome, size: 18),
-                      label: const Text(
-                        'GENERAR MI LOOK',
-                        style: TextStyle(
+                      onPressed: frontPhoto != null &&
+                              sidePhoto != null &&
+                              !_isGeneratingLook
+                          ? _generateAiLook
+                          : null,
+                      icon: _isGeneratingLook
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.auto_awesome, size: 18),
+                      label: Text(
+                        _isGeneratingLook
+                            ? 'GENERANDO LOOK CON IA...'
+                            : 'GENERAR MI LOOK',
+                        style: const TextStyle(
                             fontWeight: FontWeight.w800, letterSpacing: .4),
                       ),
                       style: FilledButton.styleFrom(
@@ -2336,29 +2473,150 @@ class _ShopShellState extends State<ShopShell> {
     );
   }
 
-  void _showPreview() {
+  Future<void> _generateAiLook() async {
+    if (_aiConfig == null || !_aiConfig!.isConfigured) {
+      _showAiConfigDialog();
+      return;
+    }
+
     final garment = activeFittingGarment ??
         (catalogProducts.isNotEmpty && selectedLook < catalogProducts.length
             ? catalogProducts[selectedLook]
             : null);
-    final targetLabel = garment != null
-        ? (activeFittingBottomGarment != null
-            ? '${garment.name} y ${activeFittingBottomGarment!.name}'
-            : garment.name)
-        : 'tu prenda elegida';
+    if (garment == null) return;
 
+    setState(() => _isGeneratingLook = true);
+
+    try {
+      File? frontFile;
+      if (frontPhoto != null) {
+        final tempDir = Directory.systemTemp;
+        frontFile = File('${tempDir.path}/front_fit_temp.jpg');
+        await frontFile.writeAsBytes(frontPhoto!);
+      }
+
+      final result = await _aiFittingService.generateLook(
+        garment: garment,
+        bottomGarment: activeFittingBottomGarment,
+        frontPhoto: frontFile,
+      );
+
+      if (!mounted) return;
+
+      if (result.success) {
+        _showLookResultDialog(result, garment);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.errorMessage ?? 'Error al generar look.'),
+            action: SnackBarAction(
+              label: 'CONFIGURAR',
+              onPressed: _showAiConfigDialog,
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isGeneratingLook = false);
+    }
+  }
+
+  void _showLookResultDialog(AiGenerationResult result, Garment garment) {
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         backgroundColor: paper,
-        title: const Text('¡Listo para probar!'),
-        content: Text(
-          'Tus dos capturas están preparadas para probar $targetLabel con IA. La generación se procesará al conectar el motor de render.',
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: lime,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Icon(Icons.auto_awesome, size: 20, color: ink),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Tu Look con IA',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: result.imageBytes != null
+                    ? Image.memory(result.imageBytes!, height: 260, fit: BoxFit.cover)
+                    : Image.network(
+                        photo(result.imageUrl ?? garment.image, width: 600),
+                        height: 260,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => const Icon(Icons.checkroom, size: 60),
+                      ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                activeFittingBottomGarment != null
+                    ? '${garment.name} + ${activeFittingBottomGarment!.name}'
+                    : garment.name,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: ink),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: line),
+                ),
+                child: Text(
+                  result.description ?? 'Look generado por ${result.providerName}.',
+                  style: const TextStyle(fontSize: 12, color: ink, height: 1.4),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Generado con ${result.providerName}',
+                style: const TextStyle(fontSize: 10, color: muted, fontStyle: FontStyle.italic),
+                textAlign: TextAlign.right,
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('ENTENDIDO'),
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('CERRAR', style: TextStyle(color: muted, fontWeight: FontWeight.w700)),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              setState(() {
+                cartQuantities[garment.id] = (cartQuantities[garment.id] ?? 0) + 1;
+                if (activeFittingBottomGarment != null) {
+                  cartQuantities[activeFittingBottomGarment!.id] =
+                      (cartQuantities[activeFittingBottomGarment!.id] ?? 0) + 1;
+                }
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Look agregado a tu bolsa de compras')),
+              );
+            },
+            icon: const Icon(Icons.shopping_bag_outlined, size: 16),
+            label: const Text('AÑADIR A BOLSA', style: TextStyle(fontWeight: FontWeight.w800)),
+            style: FilledButton.styleFrom(
+              backgroundColor: ink,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
           ),
         ],
       ),

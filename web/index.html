@@ -53,20 +53,42 @@
 
           <div class="login-card">
             <h2>Acceso al Panel</h2>
-            <p class="muted">Acceso exclusivo para cuentas de Google autorizadas con rol de administrador en Firestore.</p>
+            <p class="muted">Acceso exclusivo para administradores autorizados en Firestore.</p>
 
-            <button type="button" id="googleLoginBtn" class="btn google full" style="margin-top: 18px; margin-bottom: 14px;">
+            <form id="emailLoginForm" style="margin-top: 18px;">
+              <div class="form-group" style="margin-bottom: 12px; text-align: left;">
+                <label for="adminEmail" style="font-size: 12px; font-weight: 700; margin-bottom: 4px; display: block; color: var(--color-ink);">Correo electrónico</label>
+                <input type="email" id="adminEmail" placeholder="admin@modo.pe" required style="width: 100%; padding: 11px 12px; border: 1px solid var(--color-line); border-radius: 8px; font-size: 14px; background: #fff;" />
+              </div>
+
+              <div class="form-group" style="margin-bottom: 16px; text-align: left;">
+                <label for="adminPassword" style="font-size: 12px; font-weight: 700; margin-bottom: 4px; display: block; color: var(--color-ink);">Contraseña</label>
+                <input type="password" id="adminPassword" placeholder="••••••••" required style="width: 100%; padding: 11px 12px; border: 1px solid var(--color-line); border-radius: 8px; font-size: 14px; background: #fff;" />
+              </div>
+
+              <button type="submit" id="emailLoginBtn" class="btn primary full" style="width: 100%; padding: 12px; font-weight: 800; border-radius: 8px; letter-spacing: .5px;">
+                INICIAR SESIÓN
+              </button>
+            </form>
+
+            <div style="display: flex; align-items: center; margin: 16px 0; color: var(--color-muted); font-size: 12px;">
+              <div style="flex: 1; height: 1px; background: var(--color-line);"></div>
+              <span style="padding: 0 10px;">o continúa con</span>
+              <div style="flex: 1; height: 1px; background: var(--color-line);"></div>
+            </div>
+
+            <button type="button" id="googleLoginBtn" class="btn google full" style="margin-bottom: 14px;">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
                 <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.35 24 12 24z"/>
                 <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.17 0 9.97 0 12s.45 3.83 1.25 5.42l4.03-3.15z"/>
                 <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
               </svg>
-              Iniciar Sesión con Google Admin
+              Continuar con Google
             </button>
 
             <div style="font-size: 11px; color: var(--color-muted); line-height: 1.5; margin-bottom: 12px; background: #faf9f6; padding: 10px; border-radius: 6px; border: 1px solid var(--color-line);">
-              🛡️ El sistema verificará automáticamente si tu correo está registrado en la colección <code>admins/{email}</code> de Firestore.
+              🛡️ El sistema verificará que tu correo tenga rol <code>admin</code> en Firestore.
             </div>
 
             <p id="loginError" class="error-text" role="alert" aria-live="assertive"></p>

@@ -56,7 +56,9 @@ const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)
 // 3. DOM Elements
 const loginView = document.getElementById('loginView');
 const dashboardView = document.getElementById('dashboardView');
-const loginForm = document.getElementById('loginForm');
+const emailLoginForm = document.getElementById('emailLoginForm');
+const adminEmailInput = document.getElementById('adminEmail');
+const adminPasswordInput = document.getElementById('adminPassword');
 const googleLoginBtn = document.getElementById('googleLoginBtn');
 const loginError = document.getElementById('loginError');
 const sessionBadge = document.getElementById('sessionBadge');
@@ -675,6 +677,43 @@ async function verifyAdminRoleAndLogin(user) {
   } finally {
     hideLoading();
   }
+}
+
+// Email & Password Sign-In con Verificación de Rol Admin
+if (emailLoginForm) {
+  emailLoginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!auth || !db) {
+      loginError.textContent = 'Firebase Auth o Firestore no están inicializados.';
+      return;
+    }
+    const email = adminEmailInput ? adminEmailInput.value.trim() : '';
+    const password = adminPasswordInput ? adminPasswordInput.value : '';
+
+    if (!email || !password) {
+      loginError.textContent = 'Por favor ingresa tu correo y contraseña.';
+      return;
+    }
+
+    loginError.textContent = '';
+    showLoading('Autenticando administrador…');
+
+    try {
+      const userCredential = await auth.signInWithEmailAndPassword(email, password);
+      await verifyAdminRoleAndLogin(userCredential.user);
+    } catch (err) {
+      console.error('Email Admin Sign-In Error:', err);
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        loginError.textContent = 'Correo o contraseña incorrectos.';
+      } else if (err.code === 'auth/too-many-requests') {
+        loginError.textContent = 'Demasiados intentos fallidos. Intenta más tarde.';
+      } else {
+        loginError.textContent = err.message || 'Error al iniciar sesión.';
+      }
+    } finally {
+      hideLoading();
+    }
+  });
 }
 
 // Google OAuth Sign-In Exclusivo con Verificación de Rol Admin
