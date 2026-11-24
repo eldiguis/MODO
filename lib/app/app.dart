@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -5,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/theme/app_colors.dart';
 import '../features/admin/admin_login_barrier.dart';
+import '../features/auth/data/auth_repository.dart';
 import '../features/auth/login_screen.dart';
 import '../features/shell/shop_shell.dart';
 
@@ -18,6 +20,8 @@ class ModaApp extends StatefulWidget {
 class _ModaAppState extends State<ModaApp> {
   bool signedIn = false;
   String customerName = '';
+  String customerEmail = '';
+  bool isGoogleAuth = false;
   bool firebaseConfigured = false;
   bool checkingSession = true;
 
@@ -35,53 +39,98 @@ class _ModaAppState extends State<ModaApp> {
 
   Future<void> _loadSavedSession() async {
     try {
+      if (firebaseConfigured || Firebase.apps.isNotEmpty) {
+        final firebaseUser = FirebaseAuth.instance.currentUser;
+        if (firebaseUser != null && mounted) {
+          final email = firebaseUser.email ?? '';
+          final isGoogle = firebaseUser.providerData
+              .any((p) => p.providerId == 'google.com');
+          String name = firebaseUser.displayName ?? '';
+          if (name.isEmpty && email.isNotEmpty) {
+            name = email.split('@').first;
+          }
+          setState(() {
+            signedIn = true;
+            customerName = name.isNotEmpty ? name : 'Usuario MODO';
+            customerEmail = email;
+            isGoogleAuth = isGoogle;
+          });
+          return;
+        }
+      }
+
       final prefs = await SharedPreferences.getInstance();
       final isLogged = prefs.getBool('signedIn') ?? false;
       final savedName = prefs.getString('customerName') ?? '';
+      final savedEmail = prefs.getString('customerEmail') ?? '';
+      final savedGoogle = prefs.getBool('isGoogleAuth') ?? false;
       if (isLogged && mounted) {
         setState(() {
           signedIn = true;
           customerName =
               savedName.isNotEmpty ? savedName : 'Usuario MODO';
+          customerEmail = savedEmail;
+          isGoogleAuth = savedGoogle;
         });
       }
     } catch (_) {}
   }
 
-  Future<void> _handleSignIn(String name) async {
+  Future<void> _handleSignIn(
+    String name, {
+    String email = '',
+    bool isGoogle = false,
+  }) async {
     setState(() {
       customerName = name;
+      customerEmail = email;
+      isGoogleAuth = isGoogle;
       signedIn = true;
     });
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('signedIn', true);
       await prefs.setString('customerName', name);
+      await prefs.setString('customerEmail', email);
+      await prefs.setBool('isGoogleAuth', isGoogle);
     } catch (_) {}
   }
 
   Future<void> _handleSignOut() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('signedIn');
-      await prefs.remove('customerName');
+      await AuthRepository().signOut();
     } catch (_) {}
     if (mounted) {
       setState(() {
         signedIn = false;
         customerName = '';
+        customerEmail = '';
+        isGoogleAuth = false;
       });
     }
   }
 
   Future<void> _initFirebase() async {
-    if (!kIsWeb) {
-      try {
-        if (Firebase.apps.isEmpty) await Firebase.initializeApp();
-        if (mounted) setState(() => firebaseConfigured = true);
-      } catch (error, stackTrace) {
-        debugPrint('Firebase initialization failed: $error\n$stackTrace');
+    try {
+      if (Firebase.apps.isEmpty) {
+        if (kIsWeb) {
+          await Firebase.initializeApp(
+            options: const FirebaseOptions(
+              apiKey: "AIzaSyBoSe_Wp83gBdFgq4Je-w3zQRnKT4iqHiw",
+              authDomain: "modo-31d0e.firebaseapp.com",
+              projectId: "modo-31d0e",
+              storageBucket: "modo-31d0e.firebasestorage.app",
+              messagingSenderId: "1061048654903",
+              appId: "1:1061048654903:web:4276630759dfb5f2deb3b2",
+            ),
+          );
+        } else {
+          await Firebase.initializeApp();
+        }
       }
+      if (mounted) setState(() => firebaseConfigured = true);
+    } catch (error, stackTrace) {
+      debugPrint('Firebase initialization status: $error\n$stackTrace');
     }
   }
 
@@ -110,6 +159,8 @@ class _ModaAppState extends State<ModaApp> {
                 : signedIn
                     ? ShopShell(
                         customerName: customerName,
+                        customerEmail: customerEmail,
+                        isGoogleAuth: isGoogleAuth,
                         firebaseConfigured: firebaseConfigured,
                         onSignOut: _handleSignOut,
                       )

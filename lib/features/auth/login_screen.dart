@@ -7,9 +7,15 @@ import 'package:google_sign_in/google_sign_in.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/network/google_sign_in_web_stub.dart' as google_web
     if (dart.library.html) 'package:google_sign_in_web/web_only.dart';
+import 'data/auth_repository.dart';
 
-const String googleClientId =
-    String.fromEnvironment('GOOGLE_SIGN_IN_CLIENT_ID');
+const String defaultGoogleClientId =
+    '1061048654903-sgviubjufffv1b1j8ukj3f9b2j9cq2sa.apps.googleusercontent.com';
+
+const String googleClientId = String.fromEnvironment(
+  'GOOGLE_SIGN_IN_CLIENT_ID',
+  defaultValue: defaultGoogleClientId,
+);
 
 /// Returns a Unsplash CDN URL for a photo [source] slug, or returns [source]
 /// as-is if it already starts with http(s).
@@ -20,9 +26,21 @@ String photo(String source, {int width = 800}) {
   return 'https://images.unsplash.com/$source?auto=format&fit=crop&w=$width&q=85';
 }
 
+typedef AuthSuccessCallback = void Function(
+  String name, {
+  String email,
+  bool isGoogle,
+});
+
 class LoginScreen extends StatefulWidget {
-  final ValueChanged<String> onAuthenticated;
-  const LoginScreen({super.key, required this.onAuthenticated});
+  final AuthSuccessCallback onAuthenticated;
+  final AuthRepository authRepository;
+
+  LoginScreen({
+    super.key,
+    required this.onAuthenticated,
+    AuthRepository? authRepository,
+  }) : authRepository = authRepository ?? AuthRepository();
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -37,6 +55,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool registering = false;
   bool googleReady = false;
   bool obscurePassword = true;
+  bool submitting = false;
 
   @override
   void initState() {
@@ -51,8 +70,13 @@ class _LoginScreenState extends State<LoginScreen> {
       googleSubscription = GoogleSignIn.instance.authenticationEvents.listen(
         (event) {
           if (event is GoogleSignInAuthenticationEventSignIn) {
+            final email = event.user.email;
+            final name = event.user.displayName ??
+                (email.isNotEmpty ? email.split('@').first : 'Usuario Google');
             widget.onAuthenticated(
-              event.user.displayName ?? event.user.email.split('@').first,
+              name,
+              email: email,
+              isGoogle: true,
             );
           }
         },
@@ -86,22 +110,60 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     if (kIsWeb) return;
+    if (submitting) return;
+
+    setState(() => submitting = true);
     try {
-      await GoogleSignIn.instance.authenticate();
-    } catch (_) {
-      _message(
-        'No se pudo iniciar con Google. Comprueba la configuración de la app.',
+      final user = await widget.authRepository.signInWithGoogle();
+      widget.onAuthenticated(
+        user.name,
+        email: user.email,
+        isGoogle: true,
       );
+    } catch (e, st) {
+      debugPrint('Google Sign In error: $e\n$st');
+      final msg = AuthRepository.formatAuthError(e);
+      _message(msg);
+    } finally {
+      if (mounted) setState(() => submitting = false);
     }
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     if (!(formKey.currentState?.validate() ?? false)) return;
-    widget.onAuthenticated(
-      registering && nameController.text.trim().isNotEmpty
-          ? nameController.text.trim()
-          : emailController.text.trim().split('@').first,
-    );
+    if (submitting) return;
+
+    setState(() => submitting = true);
+    final email = emailController.text.trim();
+    final name = nameController.text.trim();
+    final password = passwordController.text;
+
+    try {
+      final AuthUser user;
+      if (registering) {
+        user = await widget.authRepository.registerWithEmail(
+          name: name,
+          email: email,
+          password: password,
+        );
+      } else {
+        user = await widget.authRepository.signInWithEmail(
+          email: email,
+          password: password,
+        );
+      }
+      widget.onAuthenticated(
+        user.name,
+        email: user.email,
+        isGoogle: user.isGoogle,
+      );
+    } catch (e, st) {
+      debugPrint('Email/Password Auth error: $e\n$st');
+      final msg = AuthRepository.formatAuthError(e);
+      _message(msg);
+    } finally {
+      if (mounted) setState(() => submitting = false);
+    }
   }
 
   @override
@@ -300,19 +362,28 @@ class _LoginScreenState extends State<LoginScreen> {
                 width: double.infinity,
                 height: 48,
                 child: FilledButton(
-                  onPressed: _submit,
+                  onPressed: submitting ? null : _submit,
                   style: FilledButton.styleFrom(
                     backgroundColor: ink,
                     foregroundColor: Colors.white,
                     shape: const StadiumBorder(),
                   ),
-                  child: Text(
-                    registering ? 'CREAR CUENTA' : 'INICIAR SESIÓN',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: .6,
-                    ),
-                  ),
+                  child: submitting
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Text(
+                          registering ? 'CREAR CUENTA' : 'INICIAR SESIÓN',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: .6,
+                          ),
+                        ),
                 ),
               ),
               const SizedBox(height: 16),
@@ -347,7 +418,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   width: double.infinity,
                   height: 46,
                   child: OutlinedButton.icon(
-                    onPressed: _continueWithGoogle,
+                    onPressed: submitting ? null : _continueWithGoogle,
                     icon: const Text(
                       'G',
                       style: TextStyle(
