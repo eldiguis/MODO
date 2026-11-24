@@ -48,6 +48,10 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
-*.apk
-.atl/
+# Firebase & Local Tooling
+.firebase/
+.agents/
+.claude/
+skills-lock.json
+*.old.json
 
