@@ -152,20 +152,18 @@ class ProductGridSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ShimmerLoading(
-      child: SliverPadding(
-        padding: padding,
-        sliver: SliverGrid(
-          delegate: SliverChildBuilderDelegate(
-            (_, _) => const ProductCardSkeleton(),
-            childCount: count,
-          ),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            crossAxisSpacing: 14,
-            mainAxisSpacing: 18,
-            childAspectRatio: .59,
-          ),
+    return SliverPadding(
+      padding: padding,
+      sliver: SliverGrid(
+        delegate: SliverChildBuilderDelegate(
+          (_, _) => const ShimmerLoading(child: ProductCardSkeleton()),
+          childCount: count,
+        ),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          crossAxisSpacing: 14,
+          mainAxisSpacing: 18,
+          childAspectRatio: .59,
         ),
       ),
     );

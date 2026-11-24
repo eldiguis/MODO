@@ -30,12 +30,16 @@ String photo(String source, {int width = 800}) {
 
 class ShopShell extends StatefulWidget {
   final String customerName;
+  final String customerEmail;
+  final bool isGoogleAuth;
   final bool firebaseConfigured;
   final VoidCallback? onSignOut;
 
   const ShopShell({
     super.key,
     required this.customerName,
+    this.customerEmail = '',
+    this.isGoogleAuth = false,
     this.firebaseConfigured = false,
     this.onSignOut,
   });
@@ -160,6 +164,26 @@ class _ShopShellState extends State<ShopShell> {
   FitPredictionResult? fitPredictionResult;
   bool isPredictingFit = false;
   int selectedLook = 0;
+  Garment? activeFittingGarment;
+  Garment? activeFittingBottomGarment;
+
+  void _loadGarmentIntoFitting(Garment garment) {
+    setState(() {
+      activeFittingGarment = garment;
+      activeFittingBottomGarment = null;
+      final idx = catalogProducts.indexWhere((p) => p.id == garment.id);
+      if (idx != -1) selectedLook = idx;
+    });
+  }
+
+  void _loadOutfitIntoFitting(Garment top, Garment bottom) {
+    setState(() {
+      activeFittingGarment = top;
+      activeFittingBottomGarment = bottom;
+      final idx = catalogProducts.indexWhere((p) => p.id == top.id);
+      if (idx != -1) selectedLook = idx;
+    });
+  }
 
   Future<void> _loadSavedBodyMeasurements() async {
     final m = await BodyMeasurements.loadLocal();
@@ -364,9 +388,31 @@ class _ShopShellState extends State<ShopShell> {
   }
 
   // ── Build ────────────────────────────────────────────────────────────────────
+  Widget _buildCurrentTab(int index) {
+    switch (index) {
+      case 0:
+        return home();
+      case 1:
+        return shop();
+      case 2:
+        return fittingRoom();
+      case 3:
+        return cart();
+      case 4:
+        return accountSettings();
+      default:
+        return home();
+    }
+  }
+
+  void _switchTabSafely(int newTab) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => tab = newTab);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final screens = [home(), shop(), fittingRoom(), cart(), accountSettings()];
     final baseTheme = Theme.of(context);
     return PopScope(
       canPop: false,
@@ -423,7 +469,7 @@ class _ShopShellState extends State<ShopShell> {
                     child: SlideTransition(position: slide, child: child),
                   );
                 },
-                child: KeyedSubtree(key: ValueKey(tab), child: screens[tab]),
+                child: KeyedSubtree(key: ValueKey<int>(tab), child: _buildCurrentTab(tab)),
               ),
             ),
             bottomNavigationBar: NavigationBar(
@@ -518,6 +564,44 @@ class _ShopShellState extends State<ShopShell> {
         ),
       );
 
+  Widget _categoryFilterBar() => SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        child: Row(
+          children: catalogCategories
+              .map((c) => Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      avatar: c == 'Favoritos'
+                          ? Icon(
+                              Icons.favorite,
+                              size: 14,
+                              color: category == c
+                                  ? lime
+                                  : Colors.redAccent,
+                            )
+                          : null,
+                      label: Text(c == 'Favoritos'
+                          ? 'Favoritos (${favorites.length})'
+                          : c),
+                      selected: category == c,
+                      onSelected: (_) {
+                        HapticFeedback.selectionClick();
+                        setState(() => category = c);
+                      },
+                      selectedColor: ink,
+                      labelStyle: TextStyle(
+                        color: category == c ? Colors.white : ink,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      backgroundColor: Colors.white,
+                      side: const BorderSide(color: line),
+                    ),
+                  ))
+              .toList(),
+        ),
+      );
+
   Widget shop() => RefreshIndicator(
         color: ink,
         backgroundColor: lime,
@@ -527,69 +611,198 @@ class _ShopShellState extends State<ShopShell> {
               const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
           slivers: [
             SliverToBoxAdapter(child: _header()),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Encuentra tu\npróximo favorito.',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 30,
-                        height: 1.05,
-                        letterSpacing: -.8,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      physics: const BouncingScrollPhysics(),
-                      child: Row(
-                        children: catalogCategories
-                            .map((c) => Padding(
-                                  padding: const EdgeInsets.only(right: 8),
-                                  child: ChoiceChip(
-                                    avatar: c == 'Favoritos'
-                                        ? Icon(
-                                            Icons.favorite,
-                                            size: 14,
-                                            color: category == c
-                                                ? lime
-                                                : Colors.redAccent,
-                                          )
-                                        : null,
-                                    label: Text(c == 'Favoritos'
-                                        ? 'Favoritos (${favorites.length})'
-                                        : c),
-                                    selected: category == c,
-                                    onSelected: (_) {
-                                      HapticFeedback.selectionClick();
-                                      setState(() => category = c);
-                                    },
-                                    selectedColor: ink,
-                                    labelStyle: TextStyle(
-                                      color: category == c
-                                          ? Colors.white
-                                          : ink,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                    backgroundColor: Colors.white,
-                                    side: const BorderSide(color: line),
-                                  ),
-                                ))
-                            .toList(),
-                      ),
-                    ),
-                  ],
+            SliverPersistentHeader(
+              pinned: true,
+              delegate: _PinnedCategoryFilterDelegate(
+                child: Container(
+                  color: paper,
+                  padding: const EdgeInsets.fromLTRB(20, 6, 20, 10),
+                  alignment: Alignment.centerLeft,
+                  child: _categoryFilterBar(),
                 ),
+                height: 56.0,
               ),
             ),
             ..._shopProductSection(),
           ],
         ),
       );
+
+  Widget _activeFittingBanner() {
+    if (activeFittingGarment == null) return const SizedBox.shrink();
+
+    final isOutfit = activeFittingBottomGarment != null;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: lime, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: .04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: lime,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  isOutfit ? 'OUTFIT CARGADO (SWIPE TO MATCH)' : 'PRENDA CARGADA PARA PRUEBA',
+                  style: const TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: .8,
+                    color: ink,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: () => setState(() {
+                  activeFittingGarment = null;
+                  activeFittingBottomGarment = null;
+                }),
+                child: const Icon(Icons.close, size: 18, color: muted),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (!isOutfit)
+            Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: Image.network(
+                    photo(activeFittingGarment!.image, width: 160),
+                    width: 58,
+                    height: 72,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => Container(
+                      width: 58,
+                      height: 72,
+                      color: const Color(0xFFECEAE4),
+                      child: const Icon(Icons.checkroom, color: muted),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        activeFittingGarment!.name,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: ink,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${activeFittingGarment!.category} • ${activeFittingGarment!.price}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          else
+            Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: Image.network(
+                    photo(activeFittingGarment!.image, width: 140),
+                    width: 50,
+                    height: 64,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => Container(
+                      width: 50,
+                      height: 64,
+                      color: const Color(0xFFECEAE4),
+                      child: const Icon(Icons.checkroom, color: muted),
+                    ),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 6),
+                  child: Icon(Icons.add, size: 16, color: muted),
+                ),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: Image.network(
+                    photo(activeFittingBottomGarment!.image, width: 140),
+                    width: 50,
+                    height: 64,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => Container(
+                      width: 50,
+                      height: 64,
+                      color: const Color(0xFFECEAE4),
+                      child: const Icon(Icons.checkroom, color: muted),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        activeFittingGarment!.name,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        activeFittingBottomGarment!.name,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        'Combinación lista para probar',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: muted,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget fittingRoom() => CustomScrollView(
         slivers: [
@@ -765,8 +978,9 @@ class _ShopShellState extends State<ShopShell> {
                     ),
                   ),
                   const SizedBox(height: 22),
+                  _activeFittingBanner(),
                   const Text(
-                    'ELIGE UNA PRENDA',
+                    'ELIGE O CAMBIA DE PRENDA',
                     style: TextStyle(
                         fontSize: 11,
                         letterSpacing: 1.3,
@@ -780,7 +994,14 @@ class _ShopShellState extends State<ShopShell> {
                       itemCount: catalogProducts.length,
                       separatorBuilder: (_, _) => const SizedBox(width: 10),
                       itemBuilder: (_, i) => GestureDetector(
-                        onTap: () => setState(() => selectedLook = i),
+                        onTap: () => setState(() {
+                          selectedLook = i;
+                          if (catalogProducts.isNotEmpty &&
+                              i < catalogProducts.length) {
+                            activeFittingGarment = catalogProducts[i];
+                            activeFittingBottomGarment = null;
+                          }
+                        }),
                         child: Container(
                           width: 88,
                           decoration: BoxDecoration(
@@ -1017,61 +1238,151 @@ class _ShopShellState extends State<ShopShell> {
                   const Text('Mi cuenta',
                       style: TextStyle(
                           fontSize: 28, fontWeight: FontWeight.w900)),
-                  const SizedBox(height: 20),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      border: Border.all(color: line),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      children: [
-                        const CircleAvatar(
-                          backgroundColor: lime,
-                          foregroundColor: ink,
-                          child: Icon(Icons.person_outline_rounded),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('Nombre de perfil',
-                                  style: TextStyle(color: muted, fontSize: 12)),
-                              const SizedBox(height: 4),
-                              Text(
-                                widget.customerName.isEmpty
-                                    ? 'Usuario MODO'
-                                    : widget.customerName,
-                                style: const TextStyle(
-                                    color: ink,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w700),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      if (widget.isGoogleAuth)
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: line),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: .04),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
                               ),
                             ],
                           ),
+                          alignment: Alignment.center,
+                          child: const Text(
+                            'G',
+                            style: TextStyle(
+                              color: Color(0xFF4285F4),
+                              fontSize: 24,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        )
+                      else
+                        const CircleAvatar(
+                          radius: 24,
+                          backgroundColor: lime,
+                          foregroundColor: ink,
+                          child: Icon(Icons.person_outline_rounded, size: 26),
                         ),
-                      ],
-                    ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.customerName.isEmpty
+                                  ? 'Usuario MODO'
+                                  : widget.customerName,
+                              style: const TextStyle(
+                                color: ink,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            if (widget.customerEmail.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                widget.customerEmail,
+                                style: const TextStyle(
+                                  color: muted,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
 
                   // ── Favoritos ──────────────────────────────────────────────
                   if (favorites.isNotEmpty) ...[
                     const SizedBox(height: 26),
-                    const Text('Mis favoritos',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w800)),
+                    Row(
+                      children: [
+                        const Text('Mis favoritos',
+                            style: TextStyle(
+                                fontSize: 18, fontWeight: FontWeight.w800)),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () {
+                            HapticFeedback.selectionClick();
+                            setState(() => category = 'Favoritos');
+                            _switchTabSafely(1);
+                          },
+                          child: Text(
+                            'Ver todos (${favorites.length})',
+                            style: const TextStyle(
+                              color: ink,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 10),
                     SizedBox(
                       height: 120,
                       child: ListView.separated(
                         scrollDirection: Axis.horizontal,
-                        itemCount: favorites.length,
+                        itemCount: favorites.length > 3 ? 4 : favorites.length,
                         separatorBuilder: (_, _) =>
                             const SizedBox(width: 10),
                         itemBuilder: (_, i) {
+                          if (i == 3 && favorites.length > 3) {
+                            final pending = favorites.length - 3;
+                            return GestureDetector(
+                              onTap: () {
+                                HapticFeedback.selectionClick();
+                                setState(() => category = 'Favoritos');
+                                _switchTabSafely(1);
+                              },
+                              child: Container(
+                                width: 86,
+                                height: 120,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFECEAE4),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: line),
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(Icons.add, size: 28, color: ink),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '+$pending',
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w900,
+                                        color: ink,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    const Text(
+                                      'Ver más',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w600,
+                                        color: muted,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }
                           final id = favorites.elementAt(i);
                           final g = catalogProducts.firstWhere(
                             (p) => p.id == id,
@@ -1130,16 +1441,8 @@ class _ShopShellState extends State<ShopShell> {
                   ],
 
                   const SizedBox(height: 26),
-                  const Text('Ajustes de cuenta',
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 8),
-                  const ListTile(
-                    contentPadding: EdgeInsets.symmetric(horizontal: 4),
-                    leading: Icon(Icons.badge_outlined, color: ink),
-                    title: Text('Datos del perfil'),
-                    subtitle: Text('Consulta el nombre asociado a tu cuenta'),
-                  ),
+                  const Divider(height: 1),
+                  const SizedBox(height: 18),
                   const Divider(height: 24),
                   const Text('Accesibilidad',
                       style:
@@ -1317,8 +1620,10 @@ class _ShopShellState extends State<ShopShell> {
                         cartQuantities[bottom.id] =
                             (cartQuantities[bottom.id] ?? 0) + 1;
                       }),
-                      onTryOutfitInFittingRoom: (top, bottom) =>
-                          setState(() => tab = 2),
+                      onTryOutfitInFittingRoom: (top, bottom) {
+                        _loadOutfitIntoFitting(top, bottom);
+                        _switchTabSafely(2);
+                      },
                     ),
                   ),
                 );
@@ -1445,8 +1750,10 @@ class _ShopShellState extends State<ShopShell> {
                   cartQuantities[bottom.id] =
                       (cartQuantities[bottom.id] ?? 0) + 1;
                 }),
-                onTryOutfitInFittingRoom: (top, bottom) =>
-                    setState(() => tab = 2),
+                onTryOutfitInFittingRoom: (top, bottom) {
+                  _loadOutfitIntoFitting(top, bottom);
+                  _switchTabSafely(2);
+                },
               ),
             ),
           );
@@ -2015,29 +2322,48 @@ class _ShopShellState extends State<ShopShell> {
             cartQuantities[product.id] =
                 (cartQuantities[product.id] ?? 0) + 1;
           }),
-          onOpenCart: () => setState(() => tab = 3),
-          onTryWithAi: () => setState(() => tab = 2),
+          onOpenCart: () => _switchTabSafely(3),
+          onTryWithAi: () {
+            _loadGarmentIntoFitting(product);
+            _switchTabSafely(2);
+          },
+          onTryOutfitInFittingRoom: (top, bottom) {
+            _loadOutfitIntoFitting(top, bottom);
+            _switchTabSafely(2);
+          },
         ),
       ),
     );
   }
 
-  void _showPreview() => showDialog(
-        context: context,
-        builder: (_) => AlertDialog(
-          backgroundColor: paper,
-          title: const Text('¡Listo para probar!'),
-          content: const Text(
-            'Tus dos capturas están preparadas. La generación IA se conectará cuando se integre el servicio de probador virtual.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('ENTENDIDO'),
-            ),
-          ],
+  void _showPreview() {
+    final garment = activeFittingGarment ??
+        (catalogProducts.isNotEmpty && selectedLook < catalogProducts.length
+            ? catalogProducts[selectedLook]
+            : null);
+    final targetLabel = garment != null
+        ? (activeFittingBottomGarment != null
+            ? '${garment.name} y ${activeFittingBottomGarment!.name}'
+            : garment.name)
+        : 'tu prenda elegida';
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: paper,
+        title: const Text('¡Listo para probar!'),
+        content: Text(
+          'Tus dos capturas están preparadas para probar $targetLabel con IA. La generación se procesará al conectar el motor de render.',
         ),
-      );
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('ENTENDIDO'),
+          ),
+        ],
+      ),
+    );
+  }
 
   Future<void> _pickCapture(bool front) async {
     showModalBottomSheet(
@@ -2157,5 +2483,32 @@ class _ShopShellState extends State<ShopShell> {
         ),
       ),
     );
+  }
+}
+
+class _PinnedCategoryFilterDelegate extends SliverPersistentHeaderDelegate {
+  final Widget child;
+  final double height;
+
+  const _PinnedCategoryFilterDelegate({
+    required this.child,
+    this.height = 56.0,
+  });
+
+  @override
+  double get minExtent => height;
+
+  @override
+  double get maxExtent => height;
+
+  @override
+  Widget build(
+      BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return SizedBox(height: height, child: child);
+  }
+
+  @override
+  bool shouldRebuild(covariant _PinnedCategoryFilterDelegate oldDelegate) {
+    return oldDelegate.height != height || oldDelegate.child != child;
   }
 }

@@ -18,7 +18,9 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 130));
 
-      expect(find.text('Encuentra tu\npróximo favorito.'), findsOneWidget);
+      expect(find.text('Todo'), findsOneWidget);
+      expect(find.byType(ChoiceChip), findsWidgets);
+      expect(find.byType(SliverPersistentHeader), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );

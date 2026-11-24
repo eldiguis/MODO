@@ -21,6 +21,7 @@ class ProductDetailPage extends StatefulWidget {
   final List<Garment>? catalog;
   final VoidCallback onAddToCart;
   final VoidCallback onTryWithAi;
+  final void Function(Garment top, Garment bottom)? onTryOutfitInFittingRoom;
   final VoidCallback? onOpenCart;
   final bool isFavorite;
   final VoidCallback? onToggleFavorite;
@@ -31,6 +32,7 @@ class ProductDetailPage extends StatefulWidget {
     this.catalog,
     required this.onAddToCart,
     required this.onTryWithAi,
+    this.onTryOutfitInFittingRoom,
     this.onOpenCart,
     this.isFavorite = false,
     this.onToggleFavorite,
@@ -324,7 +326,11 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                               },
                               onTryOutfitInFittingRoom: (top, bottom) {
                                 Navigator.pop(context);
-                                widget.onTryWithAi();
+                                if (widget.onTryOutfitInFittingRoom != null) {
+                                  widget.onTryOutfitInFittingRoom!(top, bottom);
+                                } else {
+                                  widget.onTryWithAi();
+                                }
                               },
                             ),
                           ),
